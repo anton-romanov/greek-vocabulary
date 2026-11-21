@@ -175,7 +175,7 @@ button{cursor:pointer}
       <div class="stat"><b id="stFav">0</b><span>избранных</span></div>
     </div>
     <div style="margin-top:22px">
-      <div class="meta"><span>Освоено</span><span id="progressText"></span></div>
+      <div class="meta"><span>Доля известных карточек</span><span id="progressText"></span></div>
       <div class="progress"><i id="progressBar"></i></div>
     </div>
     <div style="margin-top:22px;display:grid;gap:10px">
@@ -1541,10 +1541,17 @@ $("#saveEdit").onclick=()=>{
 
 function renderStats(){
   let known=0,missed=0,fav=0;
-  vocab.forEach(w=>{const p=pFor(w);if(p.correct>=3&&p.correct>p.wrong)known++;if(p.wrong>0)missed++;if(p.fav)fav++;});
+  vocab.forEach(w=>{
+    const p=pFor(w);
+    if(p.streak>0) known++;
+    if(p.wrong>0) missed++;
+    if(p.fav) fav++;
+  });
   $("#stTotal").textContent=vocab.length;$("#stKnown").textContent=known;$("#stMissed").textContent=missed;$("#stFav").textContent=fav;
-  const pct=vocab.length?Math.round(known/vocab.length*100):0;
-  $("#progressText").textContent=pct+"%";$("#progressBar").style.width=pct+"%";
+  const pct=vocab.length?known/vocab.length*100:0;
+  const formatted=pct.toLocaleString("ru",{maximumFractionDigits:1});
+  $("#progressText").textContent=`${known} из ${vocab.length} · ${formatted}%`;
+  $("#progressBar").style.width=pct+"%";
 }
 $("#exportBtn").onclick=()=>{
   const backup={vocab,progress,catalogVersion:CATALOG_VERSION,exportedAt:new Date().toISOString()};
