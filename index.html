@@ -1181,9 +1181,11 @@ const SEED = [
 ];
 const KEY = "greekNotebookV1";
 const PROGRESS_KEY = "greekNotebookProgressV1";
-const STATE_KEY = "greekNotebookStateV2";
+const PREVIOUS_STATE_KEY = "greekNotebookStateV2";
+const STATE_KEY = "greekNotebookStateV3";
 const CATALOG_VERSION = 2;
 const VERB_FILTER = ":verbs";
+const TOPIC_PREFIX = "topic:";
 const idOf = w => (w.greek+"|"+w.russian).normalize("NFC");
 const catalog = new Map(SEED.map(word=>[idOf(word),word]));
 function readRaw(key){
@@ -1235,8 +1237,8 @@ function normalizeProgress(entries){
     last:count(entry.last), fav:entry.fav===true
   }]));
 }
-function loadState(raw){
-  const saved = parseStored(raw);
+function loadState(raw, previousRaw){
+  const saved = parseStored(raw) ?? parseStored(previousRaw);
   const words = saved?.vocab ?? parseStored(readRaw(KEY));
   // Older versions could save malformed entries. Recover the usable words and keep the original backup.
   return {
@@ -1246,7 +1248,8 @@ function loadState(raw){
   };
 }
 let storedState = readRaw(STATE_KEY);
-let {vocab, progress} = loadState(storedState);
+let previousState = readRaw(PREVIOUS_STATE_KEY);
+let {vocab, progress} = loadState(storedState,previousState);
 let filtered = [];
 let studyPool = [];
 let cardIndex = 0;
@@ -1259,10 +1262,11 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const pFor = w => progress[idOf(w)] || {correct:0,wrong:0,streak:0,fav:false,last:0};
 
-function syncState(raw){
-  if(raw===storedState) return;
+function syncState(raw, previousRaw){
+  if(raw===storedState && (raw!==null || previousRaw===previousState)) return;
   storedState=raw;
-  ({vocab, progress}=loadState(raw));
+  previousState=previousRaw;
+  ({vocab, progress}=loadState(raw,previousRaw));
   $("#editModal").classList.remove("open");
   cardIndex=0;
   revealed=false;
@@ -1273,8 +1277,9 @@ function saveState(nextVocab, nextProgress){
   try {
     const nextState=JSON.stringify({vocab:nextVocab, progress:nextProgress, catalogVersion:CATALOG_VERSION});
     const currentState=localStorage.getItem(STATE_KEY);
-    if(currentState!==storedState){
-      syncState(currentState);
+    const currentPrevious=localStorage.getItem(PREVIOUS_STATE_KEY);
+    if(currentState!==storedState || (currentState===null && currentPrevious!==previousState)){
+      syncState(currentState,currentPrevious);
       alert("Данные обновились в другой вкладке. Повторите действие.");
       return false;
     }
@@ -1309,14 +1314,15 @@ function verbMarkup(verbs){
 function initFilters(){
   const sel=$("#topicFilter"), cur=sel.value;
   sel.innerHTML=`<option value="">Все темы</option><option value="${VERB_FILTER}">Глаголы</option>`+
-    topics().map(t=>`<option>${esc(t)}</option>`).join("");
+    topics().map(t=>`<option value="${esc(TOPIC_PREFIX+t)}">${esc(t)}</option>`).join("");
   if([...sel.options].some(o=>o.value===cur)) sel.value=cur;
 }
 function applyFilter(){
   const q=searchKey($("#search").value.trim());
-  const topic=$("#topicFilter").value;
+  const selection=$("#topicFilter").value;
+  const topic=selection.slice(TOPIC_PREFIX.length);
   filtered=vocab.filter(word=>{
-    if(topic===VERB_FILTER ? !word.verbs.length : topic && !word.topic.split(" / ").includes(topic)) return false;
+    if(selection===VERB_FILTER ? !word.verbs.length : topic && !word.topic.split(" / ").includes(topic)) return false;
     return !q || [word.greek,word.russian,word.note,...word.verbs.flatMap(v=>[v.lemma,v.aorist,v.imperfect])]
       .some(value=>searchKey(value).includes(q));
   });
@@ -1587,7 +1593,9 @@ $$(".tab").forEach(t=>t.onclick=()=>{
 });
 
 window.addEventListener("storage", event=>{
-  if(event.key===STATE_KEY || event.key===null) syncState(readRaw(STATE_KEY));
+  if(event.key===STATE_KEY || event.key===null || (event.key===PREVIOUS_STATE_KEY && storedState===null)){
+    syncState(readRaw(STATE_KEY),readRaw(PREVIOUS_STATE_KEY));
+  }
 });
 initFilters();applyFilter();
 if("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
