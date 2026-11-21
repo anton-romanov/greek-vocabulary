@@ -110,9 +110,10 @@ button{cursor:pointer}
 <div class="toolbar">
   <input class="control search" id="search" aria-label="Поиск слов и форм" placeholder="Поиск слов и форм">
   <select class="control" id="topicFilter" aria-label="Темы и глаголы"></select>
-  <select class="control" id="direction">
-    <option value="gr-ru">Ελληνικά → Русский</option>
-    <option value="ru-gr">Русский → Ελληνικά</option>
+  <select class="control" id="tense" aria-label="Что учить"><option value="">Слова</option><option value="aorist">Аорист</option><option value="imperfect">Парататикос</option></select>
+<select class="control" id="direction">
+    <option value="gr-ru">Форма / слово → Значение</option>
+    <option value="ru-gr">Значение → Форма / слово</option>
   </select>
 </div>
 
@@ -129,7 +130,7 @@ button{cursor:pointer}
         <div>
           <div class="prompt" id="cardPrompt"></div>
           <div class="answer" id="cardAnswer" hidden></div>
-          <div id="cardVerbs" hidden></div>
+          <div id="cardVerbs" hidden></div><div class="note" id="cardExample" hidden></div>
           <div class="hint" id="cardHint">Нажмите на карточку, чтобы открыть ответ</div>
         </div>
         <div class="meta"><span id="cardScore"></span><span id="cardFav"></span></div>
@@ -151,7 +152,7 @@ button{cursor:pointer}
     </div>
     <div class="quiz-q" id="quizQ"></div>
     <div class="options" id="quizOptions"></div>
-    <div class="feedback" id="quizFeedback"></div>
+    <div class="feedback" id="quizFeedback"></div><div class="note" id="quizExample"></div>
   </div>
 </section>
 
@@ -1179,6 +1180,7 @@ const SEED = [
   {"greek":"τα ρέστα","russian":"сдача","topic":"Деньги и расходы / Покупки и услуги","note":"","legacyTopic":"Еда и питание"},
   {"greek":"στήνω","russian":"ставить, устанавливать, налаживать","topic":"Техника и материалы / Дом и быт","note":"","legacyTopic":"Еда и питание","verbs":[{"lemma":"στήνω","aorist":"έστησα","imperfect":"έστηνα"}]}
 ];
+const EXAMPLES = {"μπαίνω": ["Μπαίνω στο σπίτι.", "Я вхожу в дом."], "μπήκα": ["Μπήκα στο σπίτι.", "Я вошёл в дом."], "έμπαινα": ["Κάθε φορά που έμπαινα, έβλεπα τον φίλο μου.", "Каждый раз, когда я входил, я видел своего друга."], "βλέπω": ["Βλέπω μια ταινία.", "Я смотрю фильм."], "είδα": ["Χθες είδα μια ταινία.", "Вчера я посмотрел фильм."], "έβλεπα": ["Έβλεπα τηλεόραση όταν ήρθες.", "Я смотрел телевизор, когда ты пришёл."], "τρώω": ["Τρώω πρωινό κάθε μέρα.", "Я завтракаю каждый день."], "έφαγα": ["Έφαγα μια σαλάτα.", "Я съел салат."], "έτρωγα": ["Έτρωγα όταν χτύπησε το τηλέφωνο.", "Я ел, когда зазвонил телефон."], "πίνω": ["Πίνω νερό.", "Я пью воду."], "ήπια": ["Ήπια έναν καφέ.", "Я выпил кофе."], "έπινα": ["Κάθε πρωί έπινα τσάι.", "Каждое утро я пил чай."], "μαθαίνω": ["Μαθαίνω ελληνικά.", "Я учу греческий."], "έμαθα": ["Έμαθα μια καινούρια λέξη.", "Я выучил новое слово."], "μάθαινα": ["Πέρσι μάθαινα ελληνικά.", "В прошлом году я учил греческий."], "μένω": ["Μένω στην Κύπρο.", "Я живу на Кипре."], "έμεινα": ["Έμεινα δύο μέρες στην Αθήνα.", "Я пробыл в Афинах два дня."], "έμενα": ["Όταν ήμουν παιδί, έμενα σε ένα χωριό.", "Когда я был ребёнком, я жил в деревне."], "πηγαίνω": ["Πηγαίνω στη δουλειά με λεωφορείο.", "Я езжу на работу на автобусе."], "πήγα": ["Χθες πήγα στην αγορά.", "Вчера я сходил на рынок."], "πήγαινα": ["Κάθε μέρα πήγαινα στο σχολείο με τα πόδια.", "Каждый день я ходил в школу пешком."], "παραγγέλνω": ["Παραγγέλνω έναν καφέ.", "Я заказываю кофе."], "παράγγειλα": ["Παράγγειλα μια σαλάτα.", "Я заказал салат."], "παράγγελνα": ["Συνήθως παράγγελνα ψάρι.", "Обычно я заказывал рыбу."], "η θερμοκρασία": ["Η θερμοκρασία είναι υψηλή σήμερα.", "Сегодня высокая температура."], "το ποδήλατο": ["Πηγαίνω στο σχολείο με το ποδήλατο.", "Я езжу в школу на велосипеде."], "η πλατεία": ["Η πλατεία είναι κοντά στο σπίτι μου.", "Площадь находится рядом с моим домом."], "το περιβάλλον": ["Πρέπει να προστατεύουμε το περιβάλλον.", "Мы должны защищать окружающую среду."], "η συνέντευξη": ["Έχω μια συνέντευξη αύριο.", "Завтра у меня собеседование."], "το μήνυμα": ["Διάβασα το μήνυμα.", "Я прочитал сообщение."], "η άφιξη": ["Περιμένουμε την άφιξη του τρένου.", "Мы ждём прибытия поезда."], "η αναχώρηση": ["Η αναχώρηση είναι στις δέκα.", "Отправление в десять."]};
 const KEY = "greekNotebookV1";
 const PROGRESS_KEY = "greekNotebookProgressV1";
 const STATE_KEY = "greekNotebookStateV2";
@@ -1186,7 +1188,7 @@ const VERB_EDITS_KEY = "greekNotebookVerbEdits";
 const CATALOG_VERSION = 2;
 const VERB_FILTER = ":verbs";
 const TOPIC_PREFIX = "topic:";
-const idOf = w => (w.greek+"|"+w.russian).normalize("NFC");
+const idOf = w => w.practiceId || (w.greek+"|"+w.russian).normalize("NFC");
 const catalog = new Map(SEED.map(word=>[idOf(word),word]));
 function readRaw(key){
   try {
@@ -1355,14 +1357,38 @@ function sortForReview(arr){
     return sb-sa;
   });
 }
+function practiceCards(words){
+  const tense=$("#tense").value;
+  if(!tense) return words;
+  const cards=new Map();
+  for(const word of words){
+    for(const verb of word.verbs){
+      if(!verb[tense]) continue;
+      const key=tense+"|"+verb.lemma;
+      if(cards.has(key)) continue;
+      cards.set(key,{
+        greek:verb[tense], russian:verb.lemma+" · "+(tense==="aorist"?"аорист":"парататикос"),
+        topic:word.topic, verbs:[verb], practiceId:key
+      });
+    }
+  }
+  return [...cards.values()];
+}
+function showExample(target,word,visible){
+  const example=EXAMPLES[word?.greek];
+  target.hidden=!visible || !example;
+  target.textContent=visible && example ? example.join(" — ") : "";
+}
 function refreshStudyPool(){
-  studyPool=studyMode==="random"?shuffle(filtered):sortForReview(filtered);
+  const cards=practiceCards(filtered);
+  studyPool=studyMode==="random"?shuffle(cards):sortForReview(cards);
 }
 function currentCard(){
   return studyPool[cardIndex] ?? null;
 }
 function renderCard(){
   const w=currentCard();
+  showExample($("#cardExample"),w,revealed);
   const forms=$("#cardVerbs");
   forms.hidden=!(revealed && w?.verbs.length);
   forms.innerHTML=forms.hidden ? "" : verbMarkup(w.verbs);
@@ -1384,7 +1410,7 @@ function renderCard(){
   $("#cardHint").hidden=revealed;
   $("#cardHint").textContent="Нажмите на карточку, чтобы открыть ответ";
   $("#cardTopic").textContent=w.topic.replaceAll(" / "," · ");
-  $("#cardProgress").textContent=`${cardIndex+1} / ${filtered.length||1}`;
+  $("#cardProgress").textContent=`${cardIndex+1} / ${studyPool.length||1}`;
   const p=pFor(w);
   $("#cardScore").textContent=`✓ ${p.correct} · ✕ ${p.wrong} · серия ${p.streak}`;
   $("#cardFav").textContent=p.fav?"★ избранное":"☆";
@@ -1415,6 +1441,7 @@ $("#speakBtn").onclick=()=>{
   u.lang="el-GR"; u.rate=.85; speechSynthesis.speak(u);
 };
 $("#direction").onchange=()=>{revealed=false;renderCard();newQuiz()};
+$("#tense").onchange=()=>{cardIndex=0;revealed=false;applyFilter();};
 $("#topicFilter").onchange=applyFilter;
 $("#search").oninput=applyFilter;
 $("#studyMode").onclick=e=>{
@@ -1435,7 +1462,8 @@ function shuffle(items){
 }
 function newQuiz(){
   clearTimeout(quizTimer);
-  const pool=filtered;
+  const pool=practiceCards(filtered);
+  showExample($("#quizExample"),null,false);
   const box=$("#quizOptions");
   box.innerHTML=""; $("#quizFeedback").textContent="";
   if(pool.length<2){
@@ -1463,7 +1491,7 @@ function newQuiz(){
       if(!ok)b.classList.add("wrong");
       $("#quizFeedback").textContent=ok?"Верно ✓":`Правильный ответ: ${correct}`;
       renderStats();
-      quizTimer=setTimeout(newQuiz,1100);
+      showExample($("#quizExample"),w,true);
     };
     box.appendChild(b);
   });
@@ -1557,16 +1585,17 @@ $("#saveEdit").onclick=()=>{
 
 function renderStats(){
   let known=0,missed=0,fav=0;
-  vocab.forEach(w=>{
+  const counted=practiceCards(vocab);
+  counted.forEach(w=>{
     const p=pFor(w);
     if(p.streak>0) known++;
     if(p.wrong>0) missed++;
     if(p.fav) fav++;
   });
-  $("#stTotal").textContent=vocab.length;$("#stKnown").textContent=known;$("#stMissed").textContent=missed;$("#stFav").textContent=fav;
-  const pct=vocab.length?known/vocab.length*100:0;
+  $("#stTotal").textContent=counted.length;$("#stKnown").textContent=known;$("#stMissed").textContent=missed;$("#stFav").textContent=fav;
+  const pct=counted.length?known/counted.length*100:0;
   const formatted=pct.toLocaleString("ru",{maximumFractionDigits:1});
-  $("#progressText").textContent=`${known} из ${vocab.length} · ${formatted}%`;
+  $("#progressText").textContent=`${known} из ${counted.length} · ${formatted}%`;
   $("#progressBar").style.width=pct+"%";
 }
 $("#exportBtn").onclick=()=>{
