@@ -83,6 +83,10 @@ button{cursor:pointer}
 .toggle button{border:0;background:transparent;border-radius:10px;padding:8px 10px;font-weight:700;color:var(--muted)}
 .toggle button.active{background:#fff;color:var(--accent);box-shadow:0 2px 7px rgba(0,0,0,.06)}
 .note{font-size:13px;color:var(--muted);margin-top:10px}
+.example-box{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:15px;background:var(--soft);text-align:left;font-size:16px;line-height:1.5}
+.example-box[hidden]{display:none}
+.example-box p{margin:6px 0 0}
+.example-box .example-title{font-size:13px;font-weight:700;color:var(--accent)}
 @media(max-width:720px){
  .shell{padding:14px 12px 94px}
  .brand h1{font-size:24px}
@@ -115,6 +119,7 @@ button{cursor:pointer}
     <option value="gr-ru">Форма / слово → Значение</option>
     <option value="ru-gr">Значение → Форма / слово</option>
   </select>
+  <select class="control" id="exampleFilter" aria-label="Примеры"><option value="">Все карточки</option><option value="examples">Только с примерами</option></select>
 </div>
 
 <main>
@@ -130,12 +135,13 @@ button{cursor:pointer}
         <div>
           <div class="prompt" id="cardPrompt"></div>
           <div class="answer" id="cardAnswer" hidden></div>
-          <div id="cardVerbs" hidden></div><div class="note" id="cardExample" hidden></div>
+          <div id="cardVerbs" hidden></div>
           <div class="hint" id="cardHint">Нажмите на карточку, чтобы открыть ответ</div>
         </div>
         <div class="meta"><span id="cardScore"></span><span id="cardFav"></span></div>
       </button>
     </div>
+    <div class="example-box" id="cardExample" hidden></div>
     <div class="actions">
       <button class="btn bad" id="missBtn">✕ Не знаю</button>
       <button class="btn good" id="knowBtn">✓ Знаю</button>
@@ -152,7 +158,7 @@ button{cursor:pointer}
     </div>
     <div class="quiz-q" id="quizQ"></div>
     <div class="options" id="quizOptions"></div>
-    <div class="feedback" id="quizFeedback"></div><div class="note" id="quizExample"></div>
+    <div class="feedback" id="quizFeedback"></div><div class="example-box" id="quizExample" hidden></div>
   </div>
 </section>
 
@@ -1359,7 +1365,7 @@ function sortForReview(arr){
 }
 function practiceCards(words){
   const tense=$("#tense").value;
-  if(!tense) return words;
+  if(!tense) return withExamples(words);
   const cards=new Map();
   for(const word of words){
     for(const verb of word.verbs){
@@ -1372,12 +1378,17 @@ function practiceCards(words){
       });
     }
   }
-  return [...cards.values()];
+  return withExamples([...cards.values()]);
+}
+function withExamples(cards){
+  return $("#exampleFilter").value==="examples" ? cards.filter(word=>EXAMPLES[word.greek]) : cards;
 }
 function showExample(target,word,visible){
   const example=EXAMPLES[word?.greek];
-  target.hidden=!visible || !example;
-  target.textContent=visible && example ? example.join(" — ") : "";
+  target.hidden=!visible || !word;
+  target.innerHTML=example ?
+    `<div class="example-title">Пример употребления</div><p lang="el">${esc(example[0])}</p><p>${esc(example[1])}</p>` :
+    '<div class="example-title">Пример употребления</div><p>Для этой карточки пример пока не добавлен. Выберите «Только с примерами», чтобы учить слова с примерами.</p>';
 }
 function refreshStudyPool(){
   const cards=practiceCards(filtered);
@@ -1442,6 +1453,7 @@ $("#speakBtn").onclick=()=>{
 };
 $("#direction").onchange=()=>{revealed=false;renderCard();newQuiz()};
 $("#tense").onchange=()=>{cardIndex=0;revealed=false;applyFilter();};
+$("#exampleFilter").onchange=()=>{cardIndex=0;revealed=false;applyFilter();};
 $("#topicFilter").onchange=applyFilter;
 $("#search").oninput=applyFilter;
 $("#studyMode").onclick=e=>{
