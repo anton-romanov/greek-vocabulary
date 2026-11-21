@@ -1181,8 +1181,8 @@ const SEED = [
 ];
 const KEY = "greekNotebookV1";
 const PROGRESS_KEY = "greekNotebookProgressV1";
-const PREVIOUS_STATE_KEY = "greekNotebookStateV2";
-const STATE_KEY = "greekNotebookStateV3";
+const STATE_KEY = "greekNotebookStateV2";
+const VERB_EDITS_KEY = "greekNotebookVerbEdits";
 const CATALOG_VERSION = 2;
 const VERB_FILTER = ":verbs";
 const TOPIC_PREFIX = "topic:";
@@ -1217,13 +1217,14 @@ function normalizeVerbs(verbs){
     imperfect:trimmed(verb?.imperfect)
   })).filter(verb=>verb.lemma);
 }
-function normalizeVocab(words, version){
+function normalizeVocab(words, version, savedVerbEdits){
   return words.map(word=>{
     const {greek, russian, note}=word;
-    const entry=version===CATALOG_VERSION ? null : catalog.get(idOf(word));
+    const id=idOf(word);
+    const entry=version===CATALOG_VERSION ? null : catalog.get(id);
     let topic=trimmed(word.topic);
     if(entry && (!topic || topic===(entry.legacyTopic ?? entry.topic))) topic=entry.topic;
-    const verbs=normalizeVerbs(word.verbs ?? entry?.verbs);
+    const verbs=normalizeVerbs(word.verbs ?? savedVerbEdits?.[id] ?? entry?.verbs);
     return {greek, russian, topic:topic||"Разное", note:typeof note==="string"?note:"", verbs};
   });
 }
@@ -1237,19 +1238,20 @@ function normalizeProgress(entries){
     last:count(entry.last), fav:entry.fav===true
   }]));
 }
-function loadState(raw, previousRaw){
-  const saved = parseStored(raw) ?? parseStored(previousRaw);
+function loadState(raw){
+  const saved = parseStored(raw);
   const words = saved?.vocab ?? parseStored(readRaw(KEY));
+  // Older tabs save the words and progress, but only newer tabs understand verb forms.
+  const savedVerbEdits = saved?.catalogVersion===CATALOG_VERSION ? null : parseStored(readRaw(VERB_EDITS_KEY));
   // Older versions could save malformed entries. Recover the usable words and keep the original backup.
   return {
     vocab:Array.isArray(words) ?
-      normalizeVocab(words.filter(isWord),saved?.catalogVersion) : normalizeVocab(SEED,CATALOG_VERSION),
+      normalizeVocab(words.filter(isWord),saved?.catalogVersion,savedVerbEdits) : normalizeVocab(SEED,CATALOG_VERSION),
     progress:normalizeProgress(saved?.progress ?? parseStored(readRaw(PROGRESS_KEY)))
   };
 }
 let storedState = readRaw(STATE_KEY);
-let previousState = readRaw(PREVIOUS_STATE_KEY);
-let {vocab, progress} = loadState(storedState,previousState);
+let {vocab, progress} = loadState(storedState);
 let filtered = [];
 let studyPool = [];
 let cardIndex = 0;
@@ -1262,28 +1264,42 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const pFor = w => progress[idOf(w)] || {correct:0,wrong:0,streak:0,fav:false,last:0};
 
-function syncState(raw, previousRaw){
-  if(raw===storedState && (raw!==null || previousRaw===previousState)) return;
+function syncState(raw){
+  if(raw===storedState) return;
   storedState=raw;
-  previousState=previousRaw;
-  ({vocab, progress}=loadState(raw,previousRaw));
+  ({vocab, progress}=loadState(raw));
   $("#editModal").classList.remove("open");
   cardIndex=0;
   revealed=false;
   initFilters();
   applyFilter();
 }
+function writeVerbEdits(raw){
+  if(raw===null) localStorage.removeItem(VERB_EDITS_KEY);
+  else localStorage.setItem(VERB_EDITS_KEY,raw);
+}
 function saveState(nextVocab, nextProgress){
   try {
     const nextState=JSON.stringify({vocab:nextVocab, progress:nextProgress, catalogVersion:CATALOG_VERSION});
     const currentState=localStorage.getItem(STATE_KEY);
-    const currentPrevious=localStorage.getItem(PREVIOUS_STATE_KEY);
-    if(currentState!==storedState || (currentState===null && currentPrevious!==previousState)){
-      syncState(currentState,currentPrevious);
+    if(currentState!==storedState){
+      syncState(currentState);
       alert("Данные обновились в другой вкладке. Повторите действие.");
       return false;
     }
-    localStorage.setItem(STATE_KEY, nextState);
+    const verbEdits=Object.fromEntries(nextVocab.map(word=>[idOf(word),word.verbs])
+      .filter(([id,verbs])=>JSON.stringify(verbs)!==JSON.stringify(catalog.get(id)?.verbs ?? [])));
+    const previousEdits=localStorage.getItem(VERB_EDITS_KEY);
+    const nextEdits=Object.keys(verbEdits).length ? JSON.stringify(verbEdits) : null;
+    const editsChanged=nextEdits!==previousEdits;
+    // Keep a recovery copy for old tabs and restore it if the main save fails.
+    if(editsChanged) writeVerbEdits(nextEdits);
+    try {
+      localStorage.setItem(STATE_KEY,nextState);
+    } catch (error) {
+      if(editsChanged) writeVerbEdits(previousEdits);
+      throw error;
+    }
     storedState=nextState;
   } catch {
     alert("Не удалось сохранить изменения в браузере.");
@@ -1600,9 +1616,7 @@ $$(".tab").forEach(t=>t.onclick=()=>{
 });
 
 window.addEventListener("storage", event=>{
-  if(event.key===STATE_KEY || event.key===null || (event.key===PREVIOUS_STATE_KEY && storedState===null)){
-    syncState(readRaw(STATE_KEY),readRaw(PREVIOUS_STATE_KEY));
-  }
+  if(event.key===STATE_KEY || event.key===null) syncState(readRaw(STATE_KEY));
 });
 initFilters();applyFilter();
 if("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
