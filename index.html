@@ -210,9 +210,16 @@ const SEED = [{"greek":"μπαίνω","russian":"входить","topic":"Неп
 const KEY = "greekNotebookV1";
 const PROGRESS_KEY = "greekNotebookProgressV1";
 const STATE_KEY = "greekNotebookStateV2";
-function readStored(key){
+function readRaw(key){
   try {
-    return JSON.parse(localStorage.getItem(key));
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function parseStored(raw){
+  try {
+    return JSON.parse(raw);
   } catch {
     return null;
   }
@@ -238,25 +245,52 @@ function normalizeProgress(entries){
     last:count(entry.last), fav:entry.fav===true
   }]));
 }
-const savedState = readStored(STATE_KEY);
-const savedWords = savedState?.vocab ?? readStored(KEY);
-// Older versions could save malformed entries. Recover the usable words and keep the original backup.
-let vocab = Array.isArray(savedWords) ? normalizeVocab(savedWords.filter(isWord)) : SEED;
-let progress = normalizeProgress(savedState?.progress ?? readStored(PROGRESS_KEY));
+function loadState(raw){
+  const saved = parseStored(raw);
+  const words = saved?.vocab ?? parseStored(readRaw(KEY));
+  // Older versions could save malformed entries. Recover the usable words and keep the original backup.
+  return {
+    vocab:Array.isArray(words) ? normalizeVocab(words.filter(isWord)) : SEED,
+    progress:normalizeProgress(saved?.progress ?? parseStored(readRaw(PROGRESS_KEY)))
+  };
+}
+let storedState = readRaw(STATE_KEY);
+let {vocab, progress} = loadState(storedState);
 let filtered = [];
+let randomPool = [];
 let cardIndex = 0;
 let revealed = false;
 let studyMode = "review";
 let editingIndex = null;
+let quizTimer;
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const idOf = w => (w.greek+"|"+w.russian).normalize("NFC");
 const pFor = w => progress[idOf(w)] || {correct:0,wrong:0,streak:0,fav:false,last:0};
 
+function syncState(raw){
+  if(raw===storedState) return;
+  storedState=raw;
+  ({vocab, progress}=loadState(raw));
+  $("#editModal").classList.remove("open");
+  cardIndex=0;
+  revealed=false;
+  initFilters();
+  applyFilter();
+  newQuiz();
+}
 function saveState(nextVocab, nextProgress){
   try {
-    localStorage.setItem(STATE_KEY, JSON.stringify({vocab:nextVocab, progress:nextProgress}));
+    const nextState=JSON.stringify({vocab:nextVocab, progress:nextProgress});
+    const currentState=localStorage.getItem(STATE_KEY);
+    if(currentState!==storedState){
+      syncState(currentState);
+      alert("Данные обновились в другой вкладке. Повторите действие.");
+      return false;
+    }
+    localStorage.setItem(STATE_KEY, nextState);
+    storedState=nextState;
   } catch {
     alert("Не удалось сохранить изменения в браузере.");
     return false;
@@ -280,6 +314,7 @@ function applyFilter(){
   const q=$("#search").value.trim().toLowerCase();
   const topic=$("#topicFilter").value;
   filtered=vocab.filter(v=>(!topic || v.topic.split(" / ").includes(topic)) && (!q || (v.greek+" "+v.russian+" "+v.note).toLowerCase().includes(q)));
+  if(studyMode==="random") randomPool=shuffle(filtered);
   if(cardIndex>=filtered.length) cardIndex=0;
   renderCard(); renderList(); renderStats();
   $("#countPill").textContent=`${vocab.length} слов`;
@@ -293,7 +328,7 @@ function sortForReview(arr){
   });
 }
 function cardPool(){
-  if(studyMode==="random") return [...filtered].sort(()=>Math.random()-.5);
+  if(studyMode==="random") return randomPool;
   return sortForReview(filtered);
 }
 function currentCard(){
@@ -349,12 +384,21 @@ $("#search").oninput=applyFilter;
 $("#studyMode").onclick=e=>{
   const b=e.target.closest("button[data-mode]"); if(!b)return;
   studyMode=b.dataset.mode;
+  if(studyMode==="random") randomPool=shuffle(filtered);
   $$("#studyMode button").forEach(x=>x.classList.toggle("active",x===b));
   cardIndex=0; revealed=false; renderCard();
 };
 
-function shuffle(a){return [...a].sort(()=>Math.random()-.5)}
+function shuffle(items){
+  const result=[...items];
+  for(let i=result.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [result[i],result[j]]=[result[j],result[i]];
+  }
+  return result;
+}
 function newQuiz(){
+  clearTimeout(quizTimer);
   const pool=filtered.length?filtered:vocab;
   const box=$("#quizOptions");
   box.innerHTML=""; $("#quizFeedback").textContent="";
@@ -365,7 +409,9 @@ function newQuiz(){
   const w=pool[Math.floor(Math.random()*pool.length)], dir=$("#direction").value;
   $("#quizQ").textContent=dir==="gr-ru"?w.greek:w.russian;
   const correct=dir==="gr-ru"?w.russian:w.greek;
-  const distract=shuffle(pool.filter(x=>x!==w)).slice(0,3).map(x=>dir==="gr-ru"?x.russian:x.greek);
+  const answers=new Set(pool.map(x=>dir==="gr-ru"?x.russian:x.greek));
+  answers.delete(correct);
+  const distract=shuffle(answers).slice(0,3);
   const opts=shuffle([correct,...distract]);
   opts.forEach(txt=>{
     const b=document.createElement("button"); b.className="option"; b.textContent=txt;
@@ -381,7 +427,7 @@ function newQuiz(){
       if(!ok)b.classList.add("wrong");
       $("#quizFeedback").textContent=ok?"Верно ✓":`Правильный ответ: ${correct}`;
       renderStats();
-      setTimeout(()=>{box.dataset.done="0";newQuiz()},1100);
+      quizTimer=setTimeout(newQuiz,1100);
     };
     box.appendChild(b);
   });
@@ -432,9 +478,19 @@ $("#editModal").onclick=e=>{if(e.target.id==="editModal")$("#editModal").classLi
 $("#saveEdit").onclick=()=>{
   const w={greek:$("#editGreek").value.trim(),russian:$("#editRussian").value.trim(),topic:$("#editTopic").value.trim()||"Разное",note:$("#editNote").value.trim()};
   if(!w.greek||!w.russian) return alert("Заполните греческое слово и перевод.");
+  const id=idOf(w);
+  const previousId=editingIndex===null ? null : idOf(vocab[editingIndex]);
+  if(id!==previousId && vocab.some(word=>idOf(word)===id)){
+    return alert("Карточка с таким словом и переводом уже есть.");
+  }
   const words=[...vocab];
   words[editingIndex ?? words.length]=w;
-  if(saveState(words, progress)){
+  const nextProgress={...progress};
+  if(previousId!==null && previousId!==id && progress[previousId]){
+    nextProgress[id]=progress[previousId];
+    if(!words.some(word=>idOf(word)===previousId)) delete nextProgress[previousId];
+  }
+  if(saveState(words, nextProgress)){
     $("#editModal").classList.remove("open");initFilters();applyFilter();
   }
 };
@@ -485,6 +541,9 @@ $$(".tab").forEach(t=>t.onclick=()=>{
   if(t.dataset.view==="stats")renderStats();
 });
 
+window.addEventListener("storage", event=>{
+  if(event.key===STATE_KEY || event.key===null) syncState(readRaw(STATE_KEY));
+});
 initFilters();applyFilter();newQuiz();
 if("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
 </script>
