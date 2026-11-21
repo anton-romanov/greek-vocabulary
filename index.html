@@ -257,7 +257,7 @@ function loadState(raw){
 let storedState = readRaw(STATE_KEY);
 let {vocab, progress} = loadState(storedState);
 let filtered = [];
-let randomPool = [];
+let studyPool = [];
 let cardIndex = 0;
 let revealed = false;
 let studyMode = "review";
@@ -314,7 +314,7 @@ function applyFilter(){
   const q=$("#search").value.trim().toLowerCase();
   const topic=$("#topicFilter").value;
   filtered=vocab.filter(v=>(!topic || v.topic.split(" / ").includes(topic)) && (!q || (v.greek+" "+v.russian+" "+v.note).toLowerCase().includes(q)));
-  if(studyMode==="random") randomPool=shuffle(filtered);
+  refreshStudyPool();
   if(cardIndex>=filtered.length) cardIndex=0;
   renderCard(); renderList(); renderStats();
   $("#countPill").textContent=`${vocab.length} слов`;
@@ -327,14 +327,11 @@ function sortForReview(arr){
     return sb-sa;
   });
 }
-function cardPool(){
-  if(studyMode==="random") return randomPool;
-  return sortForReview(filtered);
+function refreshStudyPool(){
+  studyPool=studyMode==="random"?shuffle(filtered):sortForReview(filtered);
 }
 function currentCard(){
-  const pool=cardPool();
-  if(!pool.length) return null;
-  return pool[cardIndex % pool.length];
+  return studyPool[cardIndex] ?? null;
 }
 function renderCard(){
   const w=currentCard();
@@ -361,7 +358,15 @@ function renderCard(){
   $("#cardScore").textContent=`✓ ${p.correct} · ✕ ${p.wrong} · серия ${p.streak}`;
   $("#cardFav").textContent=p.fav?"★ избранное":"☆";
 }
-function nextCard(){ revealed=false; cardIndex++; renderCard(); }
+function nextCard(){
+  revealed=false;
+  cardIndex++;
+  if(cardIndex>=studyPool.length){
+    cardIndex=0;
+    refreshStudyPool();
+  }
+  renderCard();
+}
 function rate(ok){
   const w=currentCard(); if(!w) return;
   const k=idOf(w), p={...pFor(w)};
@@ -384,7 +389,7 @@ $("#search").oninput=applyFilter;
 $("#studyMode").onclick=e=>{
   const b=e.target.closest("button[data-mode]"); if(!b)return;
   studyMode=b.dataset.mode;
-  if(studyMode==="random") randomPool=shuffle(filtered);
+  refreshStudyPool();
   $$("#studyMode button").forEach(x=>x.classList.toggle("active",x===b));
   cardIndex=0; revealed=false; renderCard();
 };
@@ -504,7 +509,14 @@ function renderStats(){
 }
 $("#exportBtn").onclick=()=>{
   const blob=new Blob([JSON.stringify({vocab,progress,exportedAt:new Date().toISOString()},null,2)],{type:"application/json"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="greek-vocab-backup.json"; a.click(); URL.revokeObjectURL(a.href);
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="greek-vocab-backup.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),30000);
 };
 $("#importInput").onchange=async e=>{
   const file=e.target.files[0];
