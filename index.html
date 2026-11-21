@@ -1345,7 +1345,7 @@ function applyFilter(){
       .some(value=>searchKey(value).includes(q));
   });
   refreshStudyPool();
-  if(cardIndex>=filtered.length) cardIndex=0;
+  if(cardIndex>=studyPool.length) cardIndex=0;
   renderCard(); renderList(); renderStats(); newQuiz();
   $("#countPill").textContent=`${vocab.length} слов`;
 }
