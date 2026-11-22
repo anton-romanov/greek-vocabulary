@@ -1,15 +1,12 @@
 // Login and password in front of the whole site.
 // The login is checked once, then a signed cookie keeps this browser signed in for a year.
-// Settings (Pages secrets): APP_LOGIN, APP_PASSWORD_HASH ("pbkdf2$iterations$salt$hash", base64url),
+// Settings (Pages secrets): APP_LOGIN, APP_PASSWORD_HASH ("sha256$salt$hash", base64url; made by tools/new-password.mjs),
 // SESSION_SECRET (any long random string). Changing SESSION_SECRET or the password signs every
 // browser out; that is the way to revoke a lost device.
 
 const COOKIE = "gv_session";
 const SESSION_DAYS = 400;
 const RENEW_AFTER = 24 * 60 * 60;
-const MAX_FAILS_PER_IP = 10;
-const MAX_FAILS_TOTAL = 50;
-const FAIL_WINDOW = 15 * 60;
 const PUBLIC = new Set(["/manifest.webmanifest", "/icon-192.png", "/icon-512.png"]);
 
 const enc = new TextEncoder();
@@ -25,15 +22,17 @@ function sameBytes(a, b) {
   return diff === 0;
 }
 
+// The password is a generated ~82-bit random string (tools/new-password.mjs), so a single
+// salted SHA-256 is enough: guessing it online is hopeless without attempt counters, and a
+// cheap check cannot be used to burn the site's CPU budget.
 async function passwordMatches(password, stored) {
-  const [scheme, iterations, salt, hash] = String(stored || "").split("$");
-  if (scheme !== "pbkdf2" || !salt || !hash) return false;
-  const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt: fromB64url(salt), iterations: Number(iterations) }, key, 256);
-  return sameBytes(new Uint8Array(bits), fromB64url(hash));
+  const [scheme, salt, hash] = String(stored || "").split("$");
+  if (scheme !== "sha256" || !salt || !hash) return false;
+  const saltBytes = fromB64url(salt), input = enc.encode(password);
+  const data = new Uint8Array(saltBytes.length + input.length);
+  data.set(saltBytes); data.set(input, saltBytes.length);
+  return sameBytes(new Uint8Array(await crypto.subtle.digest("SHA-256", data)), fromB64url(hash));
 }
-
 // Changing the password changes the signing key, which signs every browser out.
 async function signingKey(env) {
   return crypto.subtle.importKey("raw", enc.encode(env.SESSION_SECRET + "|" + env.APP_PASSWORD_HASH),
@@ -66,20 +65,6 @@ async function readSession(env, request) {
 const sessionCookie = value =>
   `${COOKIE}=${value}; Path=/; Max-Age=${value ? SESSION_DAYS * 86400 : 0}; HttpOnly; Secure; SameSite=Lax`;
 
-// Wrong passwords are counted in KV per address and in total; past the limit the login
-// is refused for 15 minutes without even checking the password. A browser that is already
-// signed in keeps working.
-async function failCount(env, key) {
-  return Number(await env.STATE.get(key)) || 0;
-}
-async function noteFailure(env, keys) {
-  for (const key of keys) {
-    try {
-      await env.STATE.put(key, String((await failCount(env, key)) + 1), { expirationTtl: FAIL_WINDOW });
-    } catch {}
-  }
-}
-
 function withFrameProtection(response) {
   const protectedResponse = new Response(response.body, response);
   protectedResponse.headers.set("X-Frame-Options", "DENY");
@@ -91,7 +76,7 @@ function withFrameProtection(response) {
 
 const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-function loginPage(error = "", login = "", status = 401) {
+function loginPage(error = "", login = "") {
   const html = `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -124,7 +109,7 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
 </form></body></html>`;
   // 401 so the service worker never caches this page as the app.
   return new Response(html, {
-    status,
+    status: 401,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
@@ -144,19 +129,11 @@ export async function onRequest(context) {
   }
 
   if (url.pathname === "/login" && request.method === "POST") {
-    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-    const ipKey = "login-fail:" + ip, totalKey = "login-fail:all";
-    if ((await failCount(env, ipKey)) >= MAX_FAILS_PER_IP || (await failCount(env, totalKey)) >= MAX_FAILS_TOTAL) {
-      return loginPage("Слишком много попыток. Попробуйте через 15 минут.", "", 429);
-    }
     const form = await request.formData().catch(() => null);
     const login = String(form?.get("login") || "").trim();
     const password = String(form?.get("password") || "");
     const ok = (await passwordMatches(password, env.APP_PASSWORD_HASH)) && login === env.APP_LOGIN;
-    if (!ok) {
-      await noteFailure(env, [ipKey, totalKey]);
-      return loginPage("Неверный логин или пароль", login);
-    }
+    if (!ok) return loginPage("Неверный логин или пароль", login);
     return new Response(null, {
       status: 303,
       headers: { Location: "/", "Set-Cookie": sessionCookie(await makeSession(env, login)), "Cache-Control": "no-store" },

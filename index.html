@@ -1943,7 +1943,9 @@ document.addEventListener("visibilitychange",()=>{
   else if(syncTimer){ clearTimeout(syncTimer); syncNow(); }
 });
 window.addEventListener("online",()=>scheduleSync(500));
-setInterval(()=>{ if(document.visibilityState==="visible" && syncOffline) scheduleSync(0); }, 60000);
+// Check in regularly while the app is open: picks up other devices' changes and re-sends this
+// device's state in case two devices wrote at the same moment and one write was overwritten.
+setInterval(()=>{ if(document.visibilityState==="visible") scheduleSync(0); }, 60000);
 
 window.addEventListener("storage", event=>{
   if(event.key===STATE_KEY || event.key===null) syncState(readRaw(STATE_KEY));
