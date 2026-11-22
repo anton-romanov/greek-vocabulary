@@ -18,8 +18,8 @@ function base64UrlBytes(part) {
   return Uint8Array.from(text, c => c.charCodeAt(0));
 }
 
-async function accessKeys(teamDomain) {
-  if (Date.now() - certsCache.at < 60 * 60 * 1000 && certsCache.keys.length) return certsCache.keys;
+async function accessKeys(teamDomain, refresh = false) {
+  if (!refresh && Date.now() - certsCache.at < 60 * 60 * 1000 && certsCache.keys.length) return certsCache.keys;
   const res = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`);
   if (!res.ok) throw new Error("certs " + res.status);
   const { keys } = await res.json();
@@ -38,7 +38,9 @@ async function verifiedEmail(request, env) {
     const header = JSON.parse(new TextDecoder().decode(base64UrlBytes(parts[0])));
     const payload = JSON.parse(new TextDecoder().decode(base64UrlBytes(parts[1])));
     if (header.alg !== "RS256") return null;
-    const jwk = (await accessKeys(env.TEAM_DOMAIN)).find(k => k.kid === header.kid);
+    // Access rotates its signing keys: fetch them again once if this kid is new.
+    let jwk = (await accessKeys(env.TEAM_DOMAIN)).find(k => k.kid === header.kid);
+    if (!jwk) jwk = (await accessKeys(env.TEAM_DOMAIN, true)).find(k => k.kid === header.kid);
     if (!jwk) return null;
     const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
     const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, base64UrlBytes(parts[2]),
@@ -148,6 +150,16 @@ export async function onRequest({ request, env }) {
   if (request.method === "GET") return json({ doc: stored, serverTime: Date.now() });
   if (request.method !== "POST") return json({ error: "method" }, 405);
 
+  // Only the app itself may write: a JSON body (which a plain cross-site form cannot send)
+  // from this same origin.
+  const origin = request.headers.get("Origin");
+  const site = request.headers.get("Sec-Fetch-Site");
+  const type = (request.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+  if (type !== "application/json" || (origin && origin !== new URL(request.url).origin) ||
+      (site && site !== "same-origin")) {
+    return json({ error: "forbidden" }, 403);
+  }
+
   const length = Number(request.headers.get("Content-Length") || 0);
   if (length > MAX_BODY) return json({ error: "too large" }, 413);
   const raw = await request.text();
@@ -155,8 +167,18 @@ export async function onRequest({ request, env }) {
   let body;
   try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
 
-  const now = Date.now();
-  const merged = mergeDocs(stored, cleanDoc(body?.doc), now);
-  if (JSON.stringify(merged) !== JSON.stringify(stored)) await env.STATE.put(key, JSON.stringify(merged));
-  return json({ doc: merged, serverTime: now });
+  const incoming = cleanDoc(body?.doc);
+  let base = stored, merged;
+  // KV has no compare-and-swap: after writing, read back and merge again if another device
+  // wrote in between, so neither device's changes are dropped.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    merged = mergeDocs(base, incoming, Date.now());
+    if (JSON.stringify(merged) === JSON.stringify(base)) break;
+    await env.STATE.put(key, JSON.stringify(merged));
+    await new Promise(resolve => setTimeout(resolve, 150 + Math.random() * 250));
+    const after = cleanDoc((await env.STATE.get(key, "json")) || {});
+    if (JSON.stringify(after) === JSON.stringify(merged)) break;
+    base = mergeDocs(after, merged, Date.now());
+  }
+  return json({ doc: merged, serverTime: Date.now() });
 }
