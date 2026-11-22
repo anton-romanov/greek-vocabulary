@@ -1809,6 +1809,7 @@ function writeSyncConfig(cfg){
     else localStorage.removeItem(SYNC_KEY);
   } catch {}
 }
+const own=(obj, key)=>Object.hasOwn(obj, key) ? obj[key] : undefined;
 function timeMap(value){
   return value && typeof value==="object" && !Array.isArray(value) ?
     Object.fromEntries(Object.entries(value).filter(([,t])=>Number.isFinite(t))) : {};
@@ -1816,7 +1817,8 @@ function timeMap(value){
 function syncMeta(){
   const meta=parseStored(readRaw(SYNC_META_KEY));
   return {mtime:timeMap(meta?.mtime), vtime:timeMap(meta?.vtime),
-    offset:Number.isFinite(meta?.offset) ? meta.offset : 0};
+    offset:Number.isFinite(meta?.offset) ? meta.offset : 0,
+    clockAt:Number.isFinite(meta?.clockAt) ? meta.clockAt : 0};
 }
 function writeSyncMeta(meta){
   try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta)); } catch {}
@@ -1852,13 +1854,13 @@ function localSyncDoc(){
   return {vocab, vtime:meta.vtime, progress, mtime:meta.mtime};
 }
 function progressTime(doc, key){
-  const t=doc.mtime[key];
-  return Number.isFinite(t) ? t : (doc.progress[key]?.last || 0);
+  const t=own(doc.mtime, key);
+  return Number.isFinite(t) ? t : (own(doc.progress, key)?.last || 0);
 }
 // Only recorded changes count. A word missing without a recorded time may simply be a catalog
 // word an older install never received, so it is kept rather than treated as deleted.
 function wordTime(doc, id){
-  const t=doc.vtime[id];
+  const t=own(doc.vtime, id);
   return Number.isFinite(t) ? t : 0;
 }
 function catalogWord(id){
@@ -1873,9 +1875,9 @@ function mergeSyncDocs(local, remote, now){
     ...Object.keys(local.mtime), ...Object.keys(remote.mtime)])){
     const lt=clamp(progressTime(local,key)), rt=clamp(progressTime(remote,key));
     let entry;
-    if(lt>rt) entry=local.progress[key];
-    else if(rt>lt) entry=remote.progress[key];
-    else entry=remote.progress[key] ?? (key in remote.mtime ? undefined : local.progress[key]);
+    if(lt>rt) entry=own(local.progress, key);
+    else if(rt>lt) entry=own(remote.progress, key);
+    else entry=own(remote.progress, key) ?? (Object.hasOwn(remote.mtime, key) ? undefined : own(local.progress, key));
     if(entry) progressOut[key]=entry;
     if(Math.max(lt,rt)) mtimeOut[key]=Math.max(lt,rt);
   }
@@ -1887,7 +1889,7 @@ function mergeSyncDocs(local, remote, now){
     if(lt>rt) word=lw;
     else if(rt>lt) word=rw;
     else if(lw && rw) word=JSON.stringify(rw)!==JSON.stringify(lw) && JSON.stringify(rw)===catalogWord(id) ? lw : rw;
-    else word=(!lw && id in local.vtime) || (!rw && id in remote.vtime) ? undefined : lw ?? rw;
+    else word=(!lw && Object.hasOwn(local.vtime, id)) || (!rw && Object.hasOwn(remote.vtime, id)) ? undefined : lw ?? rw;
     if(word) chosen.set(id, word);
     if(Math.max(lt,rt)) vtimeOut[id]=Math.max(lt,rt);
   }
@@ -1959,6 +1961,12 @@ function learnServerClock(updatedAt, requestedAt){
   if(!Number.isFinite(server)) return;
   const meta=syncMeta();
   meta.offset=server-(requestedAt+Date.now())/2;
+  meta.clockAt=Date.now();
+  // Changes stamped by a device clock that ran ahead must not outrank real later edits.
+  const now=syncClock(meta);
+  for(const field of ["mtime","vtime"]){
+    for(const [key,t] of Object.entries(meta[field])) if(t>now) meta[field][key]=now;
+  }
   writeSyncMeta(meta);
 }
 function applyMergedDoc(merged){
@@ -2010,7 +2018,7 @@ async function pickGist(cfg){
     const requestedAt=Date.now();
     const created=await gh("/gists", cfg.token, {method:"POST", body:JSON.stringify({
       description:"Ελληνικά — мои слова: синхронизация прогресса", public:false,
-      files:{[SYNC_FILE]:{content:syncFileContent(localSyncDoc())}}
+      files:{[SYNC_FILE]:{content:syncFileContent({vocab:[], vtime:{}, progress:{}, mtime:{}})}}
     })});
     learnServerClock(created.updated_at, requestedAt);
     return {id:created.id, extra:[]};
@@ -2030,6 +2038,9 @@ async function runSync(){
       try {
         const other=await readGist(cfg.token, otherId);
         if(other.doc && !applyMergedDoc(mergeSyncDocs(localSyncDoc(), other.doc, syncClock()))) throw new Error("local state busy");
+        // Its content now lives in the shared gist, so the duplicate can go.
+        stillConnected();
+        if(other.doc) await gh("/gists/"+otherId, cfg.token, {method:"DELETE"});
       } catch(error) { if(error.status!==404 && !error.foreign) throw error; }
     }
     stillConnected();
@@ -2039,7 +2050,28 @@ async function runSync(){
   }
   for(let attempt=0; attempt<4; attempt++){
     stillConnected();
-    const remote=await readGist(cfg.token, cfg.gistId);
+    if(Date.now()-syncMeta().clockAt>=60*60*1000){
+      // Learn GitHub's current time from a harmless write before anything is merged or sent.
+      const requestedAt=Date.now();
+      try {
+        const probed=await gh("/gists/"+cfg.gistId, cfg.token, {method:"PATCH",
+          body:JSON.stringify({description:"Ελληνικά — мои слова: синхронизация прогресса"})});
+        learnServerClock(probed?.updated_at, requestedAt);
+      } catch(error) { if(error.status!==404) throw error; }
+      stillConnected();
+    }
+    let remote;
+    try {
+      remote=await readGist(cfg.token, cfg.gistId);
+    } catch(error) {
+      if(error.status!==404) throw error;
+      // The gist was deleted on GitHub: find another one or start a new one.
+      const {id}=await pickGist(cfg);
+      stillConnected();
+      cfg.gistId=id;
+      writeSyncConfig(cfg);
+      continue;
+    }
     stillConnected();
     const local=localSyncDoc();
     const merged=remote.doc ? mergeSyncDocs(local, remote.doc, syncClock()) : local;
