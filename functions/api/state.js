@@ -31,7 +31,6 @@ function json(body, status = 200) {
 }
 
 const isObject = v => v && typeof v === "object" && !Array.isArray(v);
-const own_ = (obj, key) => (Object.hasOwn(obj, key) ? obj[key] : undefined);
 const own = (obj, key) => (Object.hasOwn(obj, key) ? obj[key] : undefined);
 const text = v => (typeof v === "string" ? v : "");
 
@@ -119,7 +118,8 @@ export function mergeDocs(stored, incoming, now) {
 // Each device keeps its own record (state:<user>:<device>) and only ever writes that one, so two
 // devices syncing at the same moment cannot overwrite each other. Every write stores the merge of
 // all records the server saw plus the device's own changes, so a newer record already contains
-// what older ones held. That is why reading the newest few is enough and old ones can be dropped.
+// what older ones held. Reading the newest few plus a few old ones (folded in, then removed) is
+// enough, and the number of records stays bounded.
 const DEVICE = /^[a-z0-9]{16,40}$/;
 const READ_NEWEST = 10;
 const DROP_AFTER = 24 * 60 * 60 * 1000;
@@ -147,14 +147,11 @@ async function loadAll(env, user, device) {
     if (key === prefix + device) own = doc;
     all = mergeDocs(all, doc, now);
   }
-  // Drop an old record only when everything in it is already in what was read.
-  const covered = (doc, field) => Object.entries(doc[field]).every(([k, t]) => (own_(all[field], k) ?? -1) >= t);
-  const drop = [];
-  for (const r of stale.slice(0, MAX_DROPS)) {
-    const doc = cleanDoc((await env.STATE.get(r.name, "json")) || {});
-    if (covered(doc, "vtime") && covered(doc, "mtime")) drop.push(r.name);
-  }
-  return { all, own, stale: drop };
+  // A few old records are folded in too; once this device's record (which then holds them)
+  // is saved, they can be removed.
+  const fold = stale.slice(0, MAX_DROPS).map(r => r.name);
+  for (const key of fold) all = mergeDocs(all, cleanDoc((await env.STATE.get(key, "json")) || {}), now);
+  return { all, own, stale: fold };
 }
 
 export async function onRequest({ request, env, data }) {
@@ -191,7 +188,8 @@ export async function onRequest({ request, env, data }) {
     } catch {
       return json({ error: "busy" }, 503);
     }
-    for (const key of stale) await env.STATE.delete(key).catch(() => {});
   }
+  // This device's saved record now contains the folded-in old records, so they can go.
+  for (const key of stale) await env.STATE.delete(key).catch(() => {});
   return json({ doc: merged, serverTime: Date.now() });
 }
