@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "greek-vocabulary:";
-const CACHE_NAME = CACHE_PREFIX + "v6";
+const CACHE_NAME = CACHE_PREFIX + "v7";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", event => {
