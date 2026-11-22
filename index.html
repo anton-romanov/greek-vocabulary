@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://gist.githubusercontent.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="theme-color" content="#f6f7f3">
 <title>Ελληνικά — мои слова</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -1904,6 +1905,7 @@ function mergeSyncDocs(local, remote, now){
 }
 function parseRemoteDoc(text){
   const doc=parseStored(text);
+  if(doc?.app==="greek-vocabulary" && Number.isFinite(doc.format) && doc.format>SYNC_FORMAT) return {newer:true};
   if(!doc || doc.app!=="greek-vocabulary" || doc.format!==SYNC_FORMAT || !Array.isArray(doc.vocab)) return null;
   return {
     vocab: normalizeVocab(doc.vocab.filter(isWord), CATALOG_VERSION),
@@ -1952,6 +1954,7 @@ async function readGist(token, gistId){
     text=await res.text();
   }
   const doc=parseRemoteDoc(text);
+  if(doc?.newer) throw Object.assign(new Error("newer format"), {newer:true});
   if(!doc) throw Object.assign(new Error("foreign file"), {foreign:true});
   return {doc, updatedAt:gist.updated_at};
 }
@@ -2003,6 +2006,7 @@ function renderSyncUi(){
   else if(!connected) setSyncStatus("Не подключена");
 }
 function syncErrorText(error){
+  if(error.newer) return "Данные записаны более новой версией приложения. Обновите страницу на этом устройстве.";
   if(error.foreign) return "В gist лежит чужой или публичный файл синхронизации. Удалите его на GitHub и подключитесь снова.";
   if(error.status===401) return "Токен не подходит или истёк. Отключите синхронизацию и вставьте новый.";
   if(error.status===403 || error.status===404) return "У токена нет доступа к gist. Нужен токен с правом «gist».";
@@ -2023,7 +2027,11 @@ async function pickGist(cfg){
     learnServerClock(created.updated_at, requestedAt);
     return {id:created.id, extra:[]};
   }
-  return {id:gists[0].id, extra:gists.slice(1).map(g=>g.id)};
+  // Only gists created within minutes of the first one are duplicates from devices connecting
+  // at the same moment. Other copies (a backup, for example) are left alone.
+  const first=Date.parse(gists[0].created_at);
+  const extra=gists.slice(1).filter(g=>Date.parse(g.created_at)-first<=10*60*1000).map(g=>g.id);
+  return {id:gists[0].id, extra};
 }
 class SyncStopped extends Error {}
 async function runSync(){
@@ -2033,18 +2041,22 @@ async function runSync(){
   const stillConnected=()=>{ if(syncConfig()?.token!==cfg.token) throw new SyncStopped(); };
   if(!cfg.gistId || Date.now()-gistCheckedAt>5*60*1000){
     const {id, extra}=await pickGist(cfg);
-    // A second gist appears if two devices connected at the same moment: fold it into the first.
-    for(const otherId of [...extra, ...(cfg.gistId && cfg.gistId!==id ? [cfg.gistId] : [])]){
+    // A duplicate from a simultaneous first connect is folded into the first gist once.
+    // Nothing is deleted on GitHub.
+    const folded=new Set(Array.isArray(cfg.folded) ? cfg.folded : []);
+    for(const otherId of extra.filter(otherId=>!folded.has(otherId))){
       try {
         const other=await readGist(cfg.token, otherId);
         if(other.doc && !applyMergedDoc(mergeSyncDocs(localSyncDoc(), other.doc, syncClock()))) throw new Error("local state busy");
-        // Its content now lives in the shared gist, so the duplicate can go.
-        stillConnected();
-        if(other.doc) await gh("/gists/"+otherId, cfg.token, {method:"DELETE"});
-      } catch(error) { if(error.status!==404 && !error.foreign) throw error; }
+        folded.add(otherId);
+      } catch(error) {
+        if(error.status!==404 && !error.foreign && !error.newer) throw error;
+        folded.add(otherId);
+      }
     }
     stillConnected();
     cfg.gistId=id;
+    cfg.folded=[...folded];
     writeSyncConfig(cfg);
     gistCheckedAt=Date.now();
   }
