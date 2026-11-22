@@ -120,18 +120,16 @@ export async function onRequest({ request, env, data }) {
   let body;
   try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
 
-  const incoming = cleanDoc(body?.doc);
-  let base = stored, merged;
-  // KV has no compare-and-swap: after writing, read back and merge again if another device
-  // wrote in between, so neither device's changes are dropped.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    merged = mergeDocs(base, incoming, Date.now());
-    if (JSON.stringify(merged) === JSON.stringify(base)) break;
-    await env.STATE.put(key, JSON.stringify(merged));
-    await new Promise(resolve => setTimeout(resolve, 150 + Math.random() * 250));
-    const after = cleanDoc((await env.STATE.get(key, "json")) || {});
-    if (JSON.stringify(after) === JSON.stringify(merged)) break;
-    base = mergeDocs(after, merged, Date.now());
+  // KV has no compare-and-swap, so two devices writing at the same moment can overwrite each
+  // other's merge. That only delays a change: every device sends its full state on each sync,
+  // so the next sync from that device merges it back in.
+  const merged = mergeDocs(stored, cleanDoc(body?.doc), Date.now());
+  if (JSON.stringify(merged) !== JSON.stringify(stored)) {
+    try {
+      await env.STATE.put(key, JSON.stringify(merged));
+    } catch {
+      return json({ error: "busy" }, 503);
+    }
   }
   return json({ doc: merged, serverTime: Date.now() });
 }

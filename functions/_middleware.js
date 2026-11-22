@@ -1,11 +1,15 @@
 // Login and password in front of the whole site.
 // The login is checked once, then a signed cookie keeps this browser signed in for a year.
 // Settings (Pages secrets): APP_LOGIN, APP_PASSWORD_HASH ("pbkdf2$iterations$salt$hash", base64url),
-// SESSION_SECRET (any long random string).
+// SESSION_SECRET (any long random string). Changing SESSION_SECRET or the password signs every
+// browser out; that is the way to revoke a lost device.
 
 const COOKIE = "gv_session";
 const SESSION_DAYS = 400;
 const RENEW_AFTER = 24 * 60 * 60;
+const MAX_FAILS_PER_IP = 10;
+const MAX_FAILS_TOTAL = 50;
+const FAIL_WINDOW = 15 * 60;
 const PUBLIC = new Set(["/manifest.webmanifest", "/icon-192.png", "/icon-512.png"]);
 
 const enc = new TextEncoder();
@@ -62,9 +66,32 @@ async function readSession(env, request) {
 const sessionCookie = value =>
   `${COOKIE}=${value}; Path=/; Max-Age=${value ? SESSION_DAYS * 86400 : 0}; HttpOnly; Secure; SameSite=Lax`;
 
+// Wrong passwords are counted in KV per address and in total; past the limit the login
+// is refused for 15 minutes without even checking the password. A browser that is already
+// signed in keeps working.
+async function failCount(env, key) {
+  return Number(await env.STATE.get(key)) || 0;
+}
+async function noteFailure(env, keys) {
+  for (const key of keys) {
+    try {
+      await env.STATE.put(key, String((await failCount(env, key)) + 1), { expirationTtl: FAIL_WINDOW });
+    } catch {}
+  }
+}
+
+function withFrameProtection(response) {
+  const protectedResponse = new Response(response.body, response);
+  protectedResponse.headers.set("X-Frame-Options", "DENY");
+  if (!protectedResponse.headers.has("Content-Security-Policy")) {
+    protectedResponse.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+  }
+  return protectedResponse;
+}
+
 const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-function loginPage(error = "", login = "") {
+function loginPage(error = "", login = "", status = 401) {
   const html = `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -97,12 +124,13 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
 </form></body></html>`;
   // 401 so the service worker never caches this page as the app.
   return new Response(html, {
-    status: 401,
+    status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
       "Content-Security-Policy": "default-src 'self'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
       "X-Robots-Tag": "noindex, nofollow",
+      "X-Frame-Options": "DENY",
       "Referrer-Policy": "no-referrer",
     },
   });
@@ -116,18 +144,23 @@ export async function onRequest(context) {
   }
 
   if (url.pathname === "/login" && request.method === "POST") {
+    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+    const ipKey = "login-fail:" + ip, totalKey = "login-fail:all";
+    if ((await failCount(env, ipKey)) >= MAX_FAILS_PER_IP || (await failCount(env, totalKey)) >= MAX_FAILS_TOTAL) {
+      return loginPage("Слишком много попыток. Попробуйте через 15 минут.", "", 429);
+    }
     const form = await request.formData().catch(() => null);
     const login = String(form?.get("login") || "").trim();
     const password = String(form?.get("password") || "");
     const ok = (await passwordMatches(password, env.APP_PASSWORD_HASH)) && login === env.APP_LOGIN;
-    if (!ok) return loginPage("Неверный логин или пароль", login);
+    if (!ok) {
+      await noteFailure(env, [ipKey, totalKey]);
+      return loginPage("Неверный логин или пароль", login);
+    }
     return new Response(null, {
       status: 303,
       headers: { Location: "/", "Set-Cookie": sessionCookie(await makeSession(env, login)), "Cache-Control": "no-store" },
     });
-  }
-  if (url.pathname === "/logout") {
-    return new Response(null, { status: 303, headers: { Location: "/", "Set-Cookie": sessionCookie("") } });
   }
   if (PUBLIC.has(url.pathname)) return next();
 
@@ -142,12 +175,10 @@ export async function onRequest(context) {
   }
 
   context.data.user = session.login;
-  const response = await next();
+  const response = withFrameProtection(await next());
   // Keep the browser signed in while it is in use.
   if (session.age > RENEW_AFTER) {
-    const renewed = new Response(response.body, response);
-    renewed.headers.append("Set-Cookie", sessionCookie(await makeSession(env, session.login)));
-    return renewed;
+    response.headers.append("Set-Cookie", sessionCookie(await makeSession(env, session.login)));
   }
   return response;
 }
