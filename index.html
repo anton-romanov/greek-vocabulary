@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://gist.githubusercontent.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="theme-color" content="#f6f7f3">
 <title>Ελληνικά — мои слова</title>
 <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
@@ -96,13 +96,11 @@ button{cursor:pointer}
 .sync-box{margin-top:22px;padding:16px;border:1px solid var(--line);border-radius:18px;background:var(--soft)}
 .sync-box h3{margin:0 0 4px;font-size:17px}
 .sync-box .note{margin-top:4px}
-.sync-box .note a{color:var(--accent)}
-.sync-row{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:10px}
-.sync-row[hidden],.sync-actions[hidden]{display:none}
+.sync-actions [hidden]{display:none}
 .sync-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .sync-status{font-weight:700;color:var(--accent);font-size:14px}
 .sync-status.error{color:var(--bad)}
-@media(max-width:720px){.sync-row{grid-template-columns:1fr}.sync-actions .btn{flex:1}}
+@media(max-width:720px){.sync-actions .btn{flex:1}}
 .example-box{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:15px;background:var(--soft);text-align:left;font-size:16px;line-height:1.5}
 .example-box[hidden]{display:none}
 .example-box p{margin:6px 0 0}
@@ -247,23 +245,16 @@ button{cursor:pointer}
     </div>
     <div class="sync-box">
       <h3>Синхронизация между устройствами</h3>
-      <div class="sync-status" id="syncStatus" role="status">Не подключена</div>
-      <p class="note" id="syncHelp">Прогресс и словарь хранятся в секретном gist на вашем GitHub: его нет в поиске и списках, но открыть его может любой, у кого есть ссылка. На каждом устройстве один раз вставьте токен GitHub с доступом только к gist: <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=%CE%95%CE%BB%CE%BB%CE%B7%CE%BD%CE%B9%CE%BA%CE%AC%20sync" target="_blank" rel="noopener">создать токен</a> (отметьте только право «gist» и задайте срок, например 90 дней). Токен хранится только в этом браузере.</p>
-      <div class="sync-row" id="syncSetup">
-        <input class="control" id="syncToken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Токен GitHub (ghp_… или github_pat_…)" aria-label="Токен GitHub">
-        <button class="btn primary" id="syncConnectBtn" type="button">Подключить</button>
-      </div>
-      <div class="sync-actions" id="syncConnected" hidden>
-        <button class="btn" id="syncNowBtn" type="button">Синхронизировать сейчас</button>
-        <button class="btn bad" id="syncOffBtn" type="button">Отключить на этом устройстве</button>
-      </div>
+      <div class="sync-status" id="syncStatus" role="status">Подключаюсь…</div>
+      <p class="note">Прогресс и ваши правки слов сохраняются автоматически и появляются на всех устройствах, где вы вошли по коду из почты.</p>
+      <div class="sync-actions"><button class="btn" id="syncNowBtn" type="button">Синхронизировать сейчас</button></div>
     </div>
     <div style="margin-top:22px;display:grid;gap:10px">
       <button class="btn" id="exportBtn">Экспортировать прогресс и словарь</button>
       <label class="btn" style="text-align:center">Импортировать JSON<input id="importInput" type="file" accept="application/json" hidden></label>
       <button class="btn bad" id="resetBtn">Сбросить только прогресс</button>
     </div>
-    <p class="note">Без синхронизации прогресс хранится только в этом браузере. Экспорт сохраняет правки и результаты в файл.</p>
+    <p class="note">Экспорт сохраняет правки и результаты в файл — на всякий случай или для переноса со старого адреса.</p>
   </div>
 </section>
 </main>
@@ -1781,36 +1772,22 @@ $$(".tab").forEach(t=>t.onclick=()=>{
   if(t.dataset.view==="stats")renderStats();
 });
 
-// ---- Sync through a private GitHub gist ----
-// Every word and every progress entry carries its own change time. On sync the newer side wins
-// per item, deletions are kept as times without an item, and ties go to the version that
-// differs from the built-in catalog (or to the gist). Untimed words are never dropped. Change times follow GitHub's clock.
-// The token stays on this device, is never exported, and sync is off on shared github.io hosts.
-const SYNC_KEY = "greekNotebookSync";
+// ---- Sync through the site's own storage on Cloudflare ----
+// The site sits behind Cloudflare Access, so the server already knows who is signed in.
+// Every word and progress entry carries a change time on the server's clock; the server merges
+// what each device sends (newer change wins per item) and returns the result.
+const SYNC_URL = "api/state";
 const SYNC_META_KEY = "greekNotebookSyncMeta";
-const SYNC_FILE = "greek-vocabulary-sync.json";
-const SYNC_API = "https://api.github.com";
-const SYNC_FORMAT = 2;
-const SYNC_SHARED_HOST = /\.github\.io$/i.test(location.hostname);
+const SYNC_ENABLED = location.protocol==="https:" ? !/\.github\.io$/i.test(location.hostname) :
+  location.protocol==="http:" && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 let applyingRemote = false;
 let syncRunning = null;
 let syncAgain = false;
 let syncTimer;
-let wroteGist = false;
-let gistCheckedAt = 0;
+let syncOffline = false;
 
-function syncConfig(){
-  if(SYNC_SHARED_HOST) return null;
-  const cfg=parseStored(readRaw(SYNC_KEY));
-  return cfg && typeof cfg.token==="string" && cfg.token ? cfg : null;
-}
-function writeSyncConfig(cfg){
-  try {
-    if(cfg) localStorage.setItem(SYNC_KEY, JSON.stringify(cfg));
-    else localStorage.removeItem(SYNC_KEY);
-  } catch {}
-}
-const own=(obj, key)=>Object.hasOwn(obj, key) ? obj[key] : undefined;
+try { localStorage.removeItem("greekNotebookSync"); } catch {}
+
 function timeMap(value){
   return value && typeof value==="object" && !Array.isArray(value) ?
     Object.fromEntries(Object.entries(value).filter(([,t])=>Number.isFinite(t))) : {};
@@ -1819,7 +1796,7 @@ function syncMeta(){
   const meta=parseStored(readRaw(SYNC_META_KEY));
   return {mtime:timeMap(meta?.mtime), vtime:timeMap(meta?.vtime),
     offset:Number.isFinite(meta?.offset) ? meta.offset : 0,
-    clockAt:Number.isFinite(meta?.clockAt) ? meta.clockAt : 0};
+    clockKnown:meta?.clockKnown===true, seeded:meta?.seeded===true};
 }
 function writeSyncMeta(meta){
   try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta)); } catch {}
@@ -1848,123 +1825,28 @@ function noteLocalChange(previousVocab, previousProgress){
     }
   }
   writeSyncMeta(meta);
-  scheduleSync(3000);
+  scheduleSync(2000);
 }
-function localSyncDoc(){
+// Edits made before this device first synced have no change time. Give the ones that clearly are
+// the learner's own (new words, changed catalog words, the old form of a word whose translation
+// was edited) the current time so they win over another device's untouched catalog.
+function seedLocalChanges(meta){
+  const now=syncClock(meta), local=wordsById(vocab), greekHere=new Set(vocab.map(w=>w.greek.normalize("NFC")));
+  for(const [id,word] of local){
+    const entry=catalog.get(id);
+    const custom=!entry || JSON.stringify(normalizeVocab([entry],CATALOG_VERSION)[0])!==JSON.stringify(word);
+    if(custom && !Number.isFinite(meta.vtime[id])) meta.vtime[id]=now;
+  }
+  for(const [id,entry] of catalog){
+    if(!local.has(id) && greekHere.has(entry.greek.normalize("NFC")) && !Number.isFinite(meta.vtime[id])) meta.vtime[id]=now;
+  }
+  meta.seeded=true;
+}
+function learnServerClock(serverTime, requestedAt){
+  if(!Number.isFinite(serverTime)) return;
   const meta=syncMeta();
-  return {vocab, vtime:meta.vtime, progress, mtime:meta.mtime};
-}
-function progressTime(doc, key){
-  const t=own(doc.mtime, key);
-  return Number.isFinite(t) ? t : (own(doc.progress, key)?.last || 0);
-}
-// Only recorded changes count. A word missing without a recorded time may simply be a catalog
-// word an older install never received, so it is kept rather than treated as deleted.
-function wordTime(doc, id){
-  const t=own(doc.vtime, id);
-  return Number.isFinite(t) ? t : 0;
-}
-function catalogWord(id){
-  const entry=catalog.get(id);
-  return entry ? JSON.stringify(normalizeVocab([entry], CATALOG_VERSION)[0]) : null;
-}
-function mergeSyncDocs(local, remote, now){
-  const limit=now+10*60*1000;
-  const clamp=t=>Math.min(t, limit);
-  const progressOut={}, mtimeOut={};
-  for(const key of new Set([...Object.keys(local.progress), ...Object.keys(remote.progress),
-    ...Object.keys(local.mtime), ...Object.keys(remote.mtime)])){
-    const lt=clamp(progressTime(local,key)), rt=clamp(progressTime(remote,key));
-    let entry;
-    if(lt>rt) entry=own(local.progress, key);
-    else if(rt>lt) entry=own(remote.progress, key);
-    else entry=own(remote.progress, key) ?? (Object.hasOwn(remote.mtime, key) ? undefined : own(local.progress, key));
-    if(entry) progressOut[key]=entry;
-    if(Math.max(lt,rt)) mtimeOut[key]=Math.max(lt,rt);
-  }
-  const lm=wordsById(local.vocab), rm=wordsById(remote.vocab), chosen=new Map(), vtimeOut={};
-  for(const id of new Set([...lm.keys(), ...rm.keys(), ...Object.keys(local.vtime), ...Object.keys(remote.vtime)])){
-    const lw=lm.get(id), rw=rm.get(id);
-    const lt=clamp(wordTime(local,id)), rt=clamp(wordTime(remote,id));
-    let word;
-    if(lt>rt) word=lw;
-    else if(rt>lt) word=rw;
-    else if(lw && rw) word=JSON.stringify(rw)!==JSON.stringify(lw) && JSON.stringify(rw)===catalogWord(id) ? lw : rw;
-    else word=(!lw && Object.hasOwn(local.vtime, id)) || (!rw && Object.hasOwn(remote.vtime, id)) ? undefined : lw ?? rw;
-    if(word) chosen.set(id, word);
-    if(Math.max(lt,rt)) vtimeOut[id]=Math.max(lt,rt);
-  }
-  const vocabOut=[];
-  for(const list of [local.vocab, remote.vocab]){
-    for(const word of list){
-      const id=idOf(word);
-      if(chosen.has(id)){ vocabOut.push(chosen.get(id)); chosen.delete(id); }
-    }
-  }
-  return {vocab:vocabOut, vtime:vtimeOut, progress:progressOut, mtime:mtimeOut};
-}
-function parseRemoteDoc(text){
-  const doc=parseStored(text);
-  if(doc?.app==="greek-vocabulary" && Number.isFinite(doc.format) && doc.format>SYNC_FORMAT) return {newer:true};
-  if(!doc || doc.app!=="greek-vocabulary" || doc.format!==SYNC_FORMAT || !Array.isArray(doc.vocab)) return null;
-  return {
-    vocab: normalizeVocab(doc.vocab.filter(isWord), CATALOG_VERSION),
-    vtime: timeMap(doc.vtime),
-    progress: normalizeProgress(doc.progress),
-    mtime: timeMap(doc.mtime)
-  };
-}
-function syncFileContent(doc){
-  return JSON.stringify({app:"greek-vocabulary", format:SYNC_FORMAT, catalogVersion:CATALOG_VERSION, ...doc});
-}
-function sameSyncContent(a, b){
-  return JSON.stringify([a.vocab,a.vtime,a.progress,a.mtime])===JSON.stringify([b.vocab,b.vtime,b.progress,b.mtime]);
-}
-async function gh(path, token, options={}){
-  const res=await fetch(SYNC_API+path, {...options, cache:"no-store", headers:{
-    "Accept":"application/vnd.github+json", "Authorization":"Bearer "+token,
-    "X-GitHub-Api-Version":"2022-11-28", ...(options.body ? {"Content-Type":"application/json"} : {})
-  }});
-  if(!res.ok){
-    const error=new Error("GitHub "+res.status);
-    error.status=res.status;
-    throw error;
-  }
-  return res.status===204 ? null : res.json();
-}
-// All private gists of this app, oldest first. The oldest one is shared by every device.
-async function listSyncGists(token){
-  const found=[];
-  for(let page=1; page<=10; page++){
-    const list=await gh(`/gists?per_page=100&page=${page}`, token);
-    found.push(...list.filter(g=>g.public===false && g.files && g.files[SYNC_FILE]));
-    if(list.length<100) break;
-  }
-  return found.sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)));
-}
-async function readGist(token, gistId){
-  const gist=await gh("/gists/"+gistId, token);
-  if(gist.public!==false) throw Object.assign(new Error("public gist"), {foreign:true});
-  const file=gist.files?.[SYNC_FILE];
-  if(!file) return {doc:null, updatedAt:gist.updated_at};
-  let text=file.content;
-  if(file.truncated){
-    const res=await fetch(file.raw_url, {cache:"no-store"});
-    if(!res.ok) throw new Error("raw "+res.status);
-    text=await res.text();
-  }
-  const doc=parseRemoteDoc(text);
-  if(doc?.newer) throw Object.assign(new Error("newer format"), {newer:true});
-  if(!doc) throw Object.assign(new Error("foreign file"), {foreign:true});
-  return {doc, updatedAt:gist.updated_at};
-}
-// Only the gist returned by our own write carries GitHub's current time in updated_at.
-function learnServerClock(updatedAt, requestedAt){
-  const server=Date.parse(updatedAt);
-  if(!Number.isFinite(server)) return;
-  const meta=syncMeta();
-  meta.offset=server-(requestedAt+Date.now())/2;
-  meta.clockAt=Date.now();
+  meta.offset=serverTime-(requestedAt+Date.now())/2;
+  meta.clockKnown=true;
   // Changes stamped by a device clock that ran ahead must not outrank real later edits.
   const now=syncClock(meta);
   for(const field of ["mtime","vtime"]){
@@ -1972,22 +1854,36 @@ function learnServerClock(updatedAt, requestedAt){
   }
   writeSyncMeta(meta);
 }
-function applyMergedDoc(merged){
-  const current=readRaw(STATE_KEY);
-  if(current!==storedState){ syncState(current); return false; }
-  const vocabChanged=JSON.stringify(merged.vocab)!==JSON.stringify(vocab);
-  const progressChanged=JSON.stringify(merged.progress)!==JSON.stringify(progress);
+async function syncRequest(method, body){
+  const requestedAt=Date.now();
+  const res=await fetch(SYNC_URL, {method, cache:"no-store", credentials:"same-origin", redirect:"manual",
+    headers:body ? {"Content-Type":"application/json"} : {}, body:body ? JSON.stringify(body) : undefined});
+  if(res.type==="opaqueredirect" || res.status===401 || res.status===403){
+    throw Object.assign(new Error("signed out"), {signedOut:true});
+  }
+  if(!res.ok) throw Object.assign(new Error("server "+res.status), {status:res.status});
+  const data=await res.json();
+  learnServerClock(data.serverTime, requestedAt);
+  return data;
+}
+function applyServerDoc(doc, sentState){
+  if(storedState!==sentState) return false;
+  const nextVocab=normalizeVocab((doc.vocab||[]).filter(isWord), CATALOG_VERSION);
+  const nextProgress=normalizeProgress(doc.progress);
+  const vocabChanged=JSON.stringify(nextVocab)!==JSON.stringify(vocab);
+  const progressChanged=JSON.stringify(nextProgress)!==JSON.stringify(progress);
   if(vocabChanged || progressChanged){
+    if(!nextVocab.length && vocab.length) return true;
     applyingRemote=true;
     let ok;
-    try { ok=saveState(merged.vocab, merged.progress, {quiet:true}); } finally { applyingRemote=false; }
+    try { ok=saveState(nextVocab, nextProgress, {quiet:true}); } finally { applyingRemote=false; }
     if(!ok) return false;
     if(vocabChanged){ initFilters(); applyFilter(); }
     else { renderStats(); renderList(); renderCard(); }
   }
-  // Keep any newer times another tab recorded while this sync was running.
+  // Keep any newer times recorded while the request was in flight.
   const meta=syncMeta();
-  for(const [field, times] of [["mtime",merged.mtime],["vtime",merged.vtime]]){
+  for(const [field, times] of [["mtime",timeMap(doc.mtime)],["vtime",timeMap(doc.vtime)]]){
     for(const [key,t] of Object.entries(times)) meta[field][key]=Math.max(meta[field][key]||0, t);
   }
   writeSyncMeta(meta);
@@ -1998,125 +1894,34 @@ function setSyncStatus(text, isError=false){
   el.textContent=text;
   el.classList.toggle("error", isError);
 }
-function renderSyncUi(){
-  const connected=!!syncConfig();
-  $("#syncSetup").hidden=connected || SYNC_SHARED_HOST;
-  $("#syncConnected").hidden=!connected;
-  if(SYNC_SHARED_HOST) setSyncStatus("Недоступна на этом адресе");
-  else if(!connected) setSyncStatus("Не подключена");
-}
-function syncErrorText(error){
-  if(error.newer) return "Данные записаны более новой версией приложения. Обновите страницу на этом устройстве.";
-  if(error.foreign) return "В gist лежит чужой или публичный файл синхронизации. Удалите его на GitHub и подключитесь снова.";
-  if(error.status===401) return "Токен не подходит или истёк. Отключите синхронизацию и вставьте новый.";
-  if(error.status===403 || error.status===404) return "У токена нет доступа к gist. Нужен токен с правом «gist».";
-  if(!navigator.onLine) return "Нет сети. Синхронизирую, когда появится интернет.";
-  return "Не удалось синхронизировать. Попробую позже.";
-}
-function withSyncLock(task){
-  return navigator.locks?.request ? navigator.locks.request("greek-vocabulary-sync", task) : task();
-}
-async function pickGist(cfg){
-  const gists=await listSyncGists(cfg.token);
-  if(!gists.length){
-    const requestedAt=Date.now();
-    const created=await gh("/gists", cfg.token, {method:"POST", body:JSON.stringify({
-      description:"Ελληνικά — мои слова: синхронизация прогресса", public:false,
-      files:{[SYNC_FILE]:{content:syncFileContent({vocab:[], vtime:{}, progress:{}, mtime:{}})}}
-    })});
-    learnServerClock(created.updated_at, requestedAt);
-    return {id:created.id, extra:[]};
-  }
-  // Only gists created within minutes of the first one are duplicates from devices connecting
-  // at the same moment. Other copies (a backup, for example) are left alone.
-  const first=Date.parse(gists[0].created_at);
-  const extra=gists.slice(1).filter(g=>Date.parse(g.created_at)-first<=10*60*1000).map(g=>g.id);
-  return {id:gists[0].id, extra};
-}
-class SyncStopped extends Error {}
 async function runSync(){
-  const cfg=syncConfig();
-  if(!cfg) return;
-  // The user may disconnect while requests are in flight: never write the token back then.
-  const stillConnected=()=>{ if(syncConfig()?.token!==cfg.token) throw new SyncStopped(); };
-  if(!cfg.gistId || Date.now()-gistCheckedAt>5*60*1000){
-    const {id, extra}=await pickGist(cfg);
-    // A duplicate from a simultaneous first connect is folded into the first gist once.
-    // Nothing is deleted on GitHub.
-    const folded=new Set(Array.isArray(cfg.folded) ? cfg.folded : []);
-    for(const otherId of extra.filter(otherId=>!folded.has(otherId))){
-      try {
-        const other=await readGist(cfg.token, otherId);
-        if(other.doc && !applyMergedDoc(mergeSyncDocs(localSyncDoc(), other.doc, syncClock()))) throw new Error("local state busy");
-        folded.add(otherId);
-      } catch(error) {
-        if(error.status!==404 && !error.foreign && !error.newer) throw error;
-        folded.add(otherId);
-      }
-    }
-    stillConnected();
-    cfg.gistId=id;
-    cfg.folded=[...folded];
-    writeSyncConfig(cfg);
-    gistCheckedAt=Date.now();
+  if(!syncMeta().clockKnown) await syncRequest("GET");
+  let meta=syncMeta();
+  if(!meta.seeded){ seedLocalChanges(meta); writeSyncMeta(meta); }
+  for(let attempt=0; attempt<3; attempt++){
+    const sentState=storedState;
+    meta=syncMeta();
+    const data=await syncRequest("POST", {doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
+    if(applyServerDoc(data.doc, sentState)) return;
   }
-  for(let attempt=0; attempt<4; attempt++){
-    stillConnected();
-    if(Date.now()-syncMeta().clockAt>=60*60*1000){
-      // Learn GitHub's current time from a harmless write before anything is merged or sent.
-      const requestedAt=Date.now();
-      try {
-        const probed=await gh("/gists/"+cfg.gistId, cfg.token, {method:"PATCH",
-          body:JSON.stringify({description:"Ελληνικά — мои слова: синхронизация прогресса"})});
-        learnServerClock(probed?.updated_at, requestedAt);
-      } catch(error) { if(error.status!==404) throw error; }
-      stillConnected();
-    }
-    let remote;
-    try {
-      remote=await readGist(cfg.token, cfg.gistId);
-    } catch(error) {
-      if(error.status!==404) throw error;
-      // The gist was deleted on GitHub: find another one or start a new one.
-      const {id}=await pickGist(cfg);
-      stillConnected();
-      cfg.gistId=id;
-      writeSyncConfig(cfg);
-      continue;
-    }
-    stillConnected();
-    const local=localSyncDoc();
-    const merged=remote.doc ? mergeSyncDocs(local, remote.doc, syncClock()) : local;
-    if(!applyMergedDoc(merged)) continue;
-    if(remote.doc && sameSyncContent(remote.doc, merged)) return;
-    stillConnected();
-    const requestedAt=Date.now();
-    const written=await gh("/gists/"+cfg.gistId, cfg.token, {method:"PATCH", body:JSON.stringify({
-      files:{[SYNC_FILE]:{content:syncFileContent(merged)}}
-    })});
-    learnServerClock(written?.updated_at, requestedAt);
-    wroteGist=true;
-    // The gist has no conditional writes, so read it back: if another device wrote in between,
-    // the next round merges its changes too.
-    await new Promise(resolve=>setTimeout(resolve, 400+Math.random()*600));
-  }
-  throw new Error("sync did not settle");
+  throw new Error("busy");
 }
 function syncNow(){
-  if(!syncConfig()) return Promise.resolve();
+  if(!SYNC_ENABLED) return Promise.resolve();
   if(syncRunning){ syncAgain=true; return syncRunning; }
   syncRunning=(async()=>{
     do {
       syncAgain=false;
-      setSyncStatus("Синхронизирую…");
+      setSyncStatus("Сохраняю…");
       try {
-        wroteGist=false;
-        await withSyncLock(runSync);
-        // Another device may have written right after us; check once more a little later.
-        if(wroteGist) scheduleSync(20000);
-        if(syncConfig()) setSyncStatus("Синхронизировано в "+new Date().toLocaleTimeString("ru",{hour:"2-digit",minute:"2-digit"}));
+        await (navigator.locks?.request ? navigator.locks.request("greek-vocabulary-sync", runSync) : runSync());
+        syncOffline=false;
+        setSyncStatus("Сохранено на всех устройствах · "+new Date().toLocaleTimeString("ru",{hour:"2-digit",minute:"2-digit"}));
       } catch(error) {
-        if(!(error instanceof SyncStopped)) setSyncStatus(syncErrorText(error), true);
+        syncOffline=!error.signedOut;
+        setSyncStatus(error.signedOut ? "Вход истёк. Обновите страницу и войдите по коду из почты." :
+          !navigator.onLine ? "Нет сети. Прогресс сохранён здесь и уйдёт, когда появится интернет." :
+          "Не удалось сохранить. Попробую ещё раз.", true);
         break;
       }
     } while(syncAgain);
@@ -2124,37 +1929,21 @@ function syncNow(){
   return syncRunning;
 }
 function scheduleSync(delay){
-  if(!syncConfig()) return;
+  if(!SYNC_ENABLED) return;
   clearTimeout(syncTimer);
   syncTimer=setTimeout(syncNow, delay);
 }
-$("#syncConnectBtn").onclick=async()=>{
-  const token=$("#syncToken").value.trim();
-  if(!token) return setSyncStatus("Вставьте токен GitHub.", true);
-  setSyncStatus("Проверяю токен…");
-  try {
-    await gh("/gists?per_page=1", token);
-  } catch(error) {
-    return setSyncStatus(syncErrorText(error), true);
-  }
-  writeSyncConfig({token});
-  gistCheckedAt=0;
-  $("#syncToken").value="";
-  renderSyncUi();
-  syncNow();
-};
+function renderSyncUi(){
+  $("#syncNowBtn").hidden=!SYNC_ENABLED;
+  if(!SYNC_ENABLED) setSyncStatus("Синхронизация работает только на greek-vocabulary.pages.dev");
+}
 $("#syncNowBtn").onclick=()=>syncNow();
-$("#syncOffBtn").onclick=()=>{
-  writeSyncConfig(null);
-  clearTimeout(syncTimer);
-  renderSyncUi();
-  setSyncStatus("Отключена на этом устройстве. Токен удалён, прогресс остался здесь и в gist.");
-};
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible") scheduleSync(300);
   else if(syncTimer){ clearTimeout(syncTimer); syncNow(); }
 });
 window.addEventListener("online",()=>scheduleSync(500));
+setInterval(()=>{ if(document.visibilityState==="visible" && syncOffline) scheduleSync(0); }, 60000);
 
 window.addEventListener("storage", event=>{
   if(event.key===STATE_KEY || event.key===null) syncState(readRaw(STATE_KEY));
