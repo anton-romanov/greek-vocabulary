@@ -247,7 +247,7 @@ button{cursor:pointer}
     <div class="sync-box">
       <h3>Синхронизация между устройствами</h3>
       <div class="sync-status" id="syncStatus" role="status">Не подключена</div>
-      <p class="note" id="syncHelp">Прогресс и словарь хранятся в приватном gist на вашем GitHub. На каждом устройстве один раз вставьте токен GitHub с доступом только к gist: <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=%CE%95%CE%BB%CE%BB%CE%B7%CE%BD%CE%B9%CE%BA%CE%AC%20sync" target="_blank" rel="noopener">создать токен</a> (право «gist», срок — на ваш выбор).</p>
+      <p class="note" id="syncHelp">Прогресс и словарь хранятся в приватном gist на вашем GitHub. На каждом устройстве один раз вставьте токен GitHub с доступом только к gist: <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=%CE%95%CE%BB%CE%BB%CE%B7%CE%BD%CE%B9%CE%BA%CE%AC%20sync" target="_blank" rel="noopener">создать токен</a> (отметьте только право «gist» и задайте срок, например 90 дней). Токен хранится только в этом браузере.</p>
       <div class="sync-row" id="syncSetup">
         <input class="control" id="syncToken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Токен GitHub (ghp_… или github_pat_…)" aria-label="Токен GitHub">
         <button class="btn primary" id="syncConnectBtn" type="button">Подключить</button>
@@ -1359,13 +1359,13 @@ function writeVerbEdits(raw){
   if(raw===null) localStorage.removeItem(VERB_EDITS_KEY);
   else localStorage.setItem(VERB_EDITS_KEY,raw);
 }
-function saveState(nextVocab, nextProgress){
+function saveState(nextVocab, nextProgress, {quiet=false}={}){
   try {
     const nextState=JSON.stringify({vocab:nextVocab, progress:nextProgress, catalogVersion:CATALOG_VERSION});
     const currentState=localStorage.getItem(STATE_KEY);
     if(currentState!==storedState){
       syncState(currentState);
-      alert("Данные обновились в другой вкладке. Повторите действие.");
+      if(!quiet) alert("Данные обновились в другой вкладке. Повторите действие.");
       return false;
     }
     const verbEdits=Object.fromEntries(nextVocab.map(word=>[idOf(word),word.verbs])
@@ -1383,7 +1383,7 @@ function saveState(nextVocab, nextProgress){
     }
     storedState=nextState;
   } catch {
-    alert("Не удалось сохранить изменения в браузере.");
+    if(!quiet) alert("Не удалось сохранить изменения в браузере.");
     return false;
   }
   const previousVocab=vocab, previousProgress=progress;
@@ -1781,19 +1781,24 @@ $$(".tab").forEach(t=>t.onclick=()=>{
 });
 
 // ---- Sync through a private GitHub gist ----
-// Each progress entry carries a change time (kept in SYNC_META_KEY, or its last answer time).
-// On sync the newer side wins per word, ties go to the gist, and the vocabulary as a whole
-// follows the newer edit. The token stays on this device and is never exported.
+// Every word and every progress entry carries its own change time. On sync the newer side wins
+// per item, deletions are kept as times without an item, and ties go to the version that
+// differs from the built-in catalog (or to the gist). Change times follow GitHub's clock.
+// The token stays on this device, is never exported, and sync is off on shared github.io hosts.
 const SYNC_KEY = "greekNotebookSync";
 const SYNC_META_KEY = "greekNotebookSyncMeta";
 const SYNC_FILE = "greek-vocabulary-sync.json";
 const SYNC_API = "https://api.github.com";
+const SYNC_FORMAT = 2;
+const SYNC_SHARED_HOST = /\.github\.io$/i.test(location.hostname);
 let applyingRemote = false;
 let syncRunning = null;
 let syncAgain = false;
 let syncTimer;
+let gistChecked = false;
 
 function syncConfig(){
+  if(SYNC_SHARED_HOST) return null;
   const cfg=parseStored(readRaw(SYNC_KEY));
   return cfg && typeof cfg.token==="string" && cfg.token ? cfg : null;
 }
@@ -1803,67 +1808,113 @@ function writeSyncConfig(cfg){
     else localStorage.removeItem(SYNC_KEY);
   } catch {}
 }
+function timeMap(value){
+  return value && typeof value==="object" && !Array.isArray(value) ?
+    Object.fromEntries(Object.entries(value).filter(([,t])=>Number.isFinite(t))) : {};
+}
 function syncMeta(){
   const meta=parseStored(readRaw(SYNC_META_KEY));
-  return {
-    mtime: meta?.mtime && typeof meta.mtime==="object" && !Array.isArray(meta.mtime) ? meta.mtime : {},
-    vocabTime: Number.isFinite(meta?.vocabTime) ? meta.vocabTime : 0
-  };
+  return {mtime:timeMap(meta?.mtime), vtime:timeMap(meta?.vtime),
+    offset:Number.isFinite(meta?.offset) ? meta.offset : 0};
 }
 function writeSyncMeta(meta){
   try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta)); } catch {}
 }
+function syncClock(meta=syncMeta()){
+  return Date.now()+meta.offset;
+}
+function wordsById(list){
+  const map=new Map();
+  for(const word of list){
+    const id=idOf(word);
+    if(!map.has(id)) map.set(id, word);
+  }
+  return map;
+}
 function noteLocalChange(previousVocab, previousProgress){
   if(applyingRemote) return;
-  const meta=syncMeta(), now=Date.now();
+  const meta=syncMeta(), now=syncClock(meta);
   for(const key of new Set([...Object.keys(previousProgress), ...Object.keys(progress)])){
     if(JSON.stringify(previousProgress[key])!==JSON.stringify(progress[key])) meta.mtime[key]=now;
   }
-  if(previousVocab!==vocab && JSON.stringify(previousVocab)!==JSON.stringify(vocab)) meta.vocabTime=now;
+  if(previousVocab!==vocab){
+    const before=wordsById(previousVocab), after=wordsById(vocab);
+    for(const id of new Set([...before.keys(), ...after.keys()])){
+      if(JSON.stringify(before.get(id))!==JSON.stringify(after.get(id))) meta.vtime[id]=now;
+    }
+  }
   writeSyncMeta(meta);
   scheduleSync(3000);
 }
 function localSyncDoc(){
   const meta=syncMeta();
-  return {app:"greek-vocabulary", format:1, catalogVersion:CATALOG_VERSION,
-    vocab, vocabTime:meta.vocabTime, progress, mtime:meta.mtime};
+  return {vocab, vtime:meta.vtime, progress, mtime:meta.mtime};
 }
-function changeTime(doc, key){
-  const t=doc.mtime?.[key];
-  return Number.isFinite(t) ? t : (doc.progress?.[key]?.last || 0);
+function progressTime(doc, key){
+  const t=doc.mtime[key];
+  return Number.isFinite(t) ? t : (doc.progress[key]?.last || 0);
 }
-function mergeSyncDocs(local, remote){
+// Every device starts with the whole catalog, so a catalog word missing without a recorded
+// time was removed or edited before sync was turned on: it counts as an early deletion.
+function wordTime(doc, id, present){
+  const t=doc.vtime[id];
+  if(Number.isFinite(t)) return t;
+  return !present && catalog.has(id) ? 1 : 0;
+}
+function catalogWord(id){
+  const entry=catalog.get(id);
+  return entry ? JSON.stringify(normalizeVocab([entry], CATALOG_VERSION)[0]) : null;
+}
+function mergeSyncDocs(local, remote, now){
+  const limit=now+10*60*1000;
+  const clamp=t=>Math.min(t, limit);
   const progressOut={}, mtimeOut={};
   for(const key of new Set([...Object.keys(local.progress), ...Object.keys(remote.progress),
     ...Object.keys(local.mtime), ...Object.keys(remote.mtime)])){
-    const lt=changeTime(local,key), rt=changeTime(remote,key);
-    const src=lt>rt ? local : remote;
-    const t=Math.max(lt,rt);
-    if(src.progress[key]) progressOut[key]=src.progress[key];
-    else if(!(key in src.progress) && !(key in src.mtime) && (local.progress[key] || remote.progress[key])){
-      progressOut[key]=local.progress[key] || remote.progress[key];
-    }
-    if(t) mtimeOut[key]=t;
+    const lt=clamp(progressTime(local,key)), rt=clamp(progressTime(remote,key));
+    let entry;
+    if(lt>rt) entry=local.progress[key];
+    else if(rt>lt) entry=remote.progress[key];
+    else entry=remote.progress[key] ?? (key in remote.mtime ? undefined : local.progress[key]);
+    if(entry) progressOut[key]=entry;
+    if(Math.max(lt,rt)) mtimeOut[key]=Math.max(lt,rt);
   }
-  const remoteVocab=Array.isArray(remote.vocab) && remote.vocab.length;
-  const useLocalVocab=!remoteVocab || local.vocabTime>remote.vocabTime;
-  return {
-    app:"greek-vocabulary", format:1, catalogVersion:CATALOG_VERSION,
-    vocab: useLocalVocab ? local.vocab : remote.vocab,
-    vocabTime: Math.max(local.vocabTime, remote.vocabTime),
-    progress: progressOut, mtime: mtimeOut
-  };
+  const lm=wordsById(local.vocab), rm=wordsById(remote.vocab), chosen=new Map(), vtimeOut={};
+  for(const id of new Set([...lm.keys(), ...rm.keys(), ...Object.keys(local.vtime), ...Object.keys(remote.vtime)])){
+    const lw=lm.get(id), rw=rm.get(id);
+    const lt=clamp(wordTime(local,id,!!lw)), rt=clamp(wordTime(remote,id,!!rw));
+    let word;
+    if(lt>rt) word=lw;
+    else if(rt>lt) word=rw;
+    else if(lw && rw) word=JSON.stringify(rw)!==JSON.stringify(lw) && JSON.stringify(rw)===catalogWord(id) ? lw : rw;
+    else word=lw ?? rw;
+    if(word) chosen.set(id, word);
+    if(Math.max(lt,rt)) vtimeOut[id]=Math.max(lt,rt);
+  }
+  const vocabOut=[];
+  for(const list of [local.vocab, remote.vocab]){
+    for(const word of list){
+      const id=idOf(word);
+      if(chosen.has(id)){ vocabOut.push(chosen.get(id)); chosen.delete(id); }
+    }
+  }
+  return {vocab:vocabOut, vtime:vtimeOut, progress:progressOut, mtime:mtimeOut};
 }
 function parseRemoteDoc(text){
   const doc=parseStored(text);
-  if(!doc || doc.app!=="greek-vocabulary") return null;
+  if(!doc || doc.app!=="greek-vocabulary" || doc.format!==SYNC_FORMAT || !Array.isArray(doc.vocab)) return null;
   return {
-    vocab: Array.isArray(doc.vocab) ? normalizeVocab(doc.vocab.filter(isWord), doc.catalogVersion) : [],
-    vocabTime: Number.isFinite(doc.vocabTime) ? doc.vocabTime : 0,
+    vocab: normalizeVocab(doc.vocab.filter(isWord), CATALOG_VERSION),
+    vtime: timeMap(doc.vtime),
     progress: normalizeProgress(doc.progress),
-    mtime: doc.mtime && typeof doc.mtime==="object" && !Array.isArray(doc.mtime) ?
-      Object.fromEntries(Object.entries(doc.mtime).filter(([,t])=>Number.isFinite(t))) : {}
+    mtime: timeMap(doc.mtime)
   };
+}
+function syncFileContent(doc){
+  return JSON.stringify({app:"greek-vocabulary", format:SYNC_FORMAT, catalogVersion:CATALOG_VERSION, ...doc});
+}
+function sameSyncContent(a, b){
+  return JSON.stringify([a.vocab,a.vtime,a.progress,a.mtime])===JSON.stringify([b.vocab,b.vtime,b.progress,b.mtime]);
 }
 async function gh(path, token, options={}){
   const res=await fetch(SYNC_API+path, {...options, cache:"no-store", headers:{
@@ -1877,44 +1928,57 @@ async function gh(path, token, options={}){
   }
   return res.status===204 ? null : res.json();
 }
-async function findOrCreateGist(token){
+// All private gists of this app, oldest first. The oldest one is shared by every device.
+async function listSyncGists(token){
+  const found=[];
   for(let page=1; page<=10; page++){
     const list=await gh(`/gists?per_page=100&page=${page}`, token);
-    const found=list.find(g=>g.files && g.files[SYNC_FILE]);
-    if(found) return found.id;
+    found.push(...list.filter(g=>g.public===false && g.files && g.files[SYNC_FILE]));
     if(list.length<100) break;
   }
-  const created=await gh("/gists", token, {method:"POST", body:JSON.stringify({
-    description:"Ελληνικά — мои слова: синхронизация прогресса",
-    public:false,
-    files:{[SYNC_FILE]:{content:JSON.stringify(localSyncDoc())}}
-  })});
-  return created.id;
+  return found.sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)));
 }
-async function readGistDoc(token, gistId){
+async function readGist(token, gistId){
   const gist=await gh("/gists/"+gistId, token);
+  if(gist.public!==false) throw Object.assign(new Error("public gist"), {foreign:true});
   const file=gist.files?.[SYNC_FILE];
-  if(!file) return null;
+  if(!file) return {doc:null, updatedAt:gist.updated_at};
   let text=file.content;
   if(file.truncated){
     const res=await fetch(file.raw_url, {cache:"no-store"});
     if(!res.ok) throw new Error("raw "+res.status);
     text=await res.text();
   }
-  return parseRemoteDoc(text);
+  const doc=parseRemoteDoc(text);
+  if(!doc) throw Object.assign(new Error("foreign file"), {foreign:true});
+  return {doc, updatedAt:gist.updated_at};
+}
+function learnServerClock(updatedAt, requestedAt){
+  const server=Date.parse(updatedAt);
+  if(!Number.isFinite(server)) return;
+  const meta=syncMeta();
+  meta.offset=server-(requestedAt+Date.now())/2;
+  writeSyncMeta(meta);
 }
 function applyMergedDoc(merged){
+  const current=readRaw(STATE_KEY);
+  if(current!==storedState){ syncState(current); return false; }
   const vocabChanged=JSON.stringify(merged.vocab)!==JSON.stringify(vocab);
   const progressChanged=JSON.stringify(merged.progress)!==JSON.stringify(progress);
   if(vocabChanged || progressChanged){
     applyingRemote=true;
     let ok;
-    try { ok=saveState(merged.vocab, merged.progress); } finally { applyingRemote=false; }
+    try { ok=saveState(merged.vocab, merged.progress, {quiet:true}); } finally { applyingRemote=false; }
     if(!ok) return false;
     if(vocabChanged){ initFilters(); applyFilter(); }
     else { renderStats(); renderList(); renderCard(); }
   }
-  writeSyncMeta({mtime:merged.mtime, vocabTime:merged.vocabTime});
+  // Keep any newer times another tab recorded while this sync was running.
+  const meta=syncMeta();
+  for(const [field, times] of [["mtime",merged.mtime],["vtime",merged.vtime]]){
+    for(const [key,t] of Object.entries(times)) meta[field][key]=Math.max(meta[field][key]||0, t);
+  }
+  writeSyncMeta(meta);
   return true;
 }
 function setSyncStatus(text, isError=false){
@@ -1924,15 +1988,65 @@ function setSyncStatus(text, isError=false){
 }
 function renderSyncUi(){
   const connected=!!syncConfig();
-  $("#syncSetup").hidden=connected;
+  $("#syncSetup").hidden=connected || SYNC_SHARED_HOST;
   $("#syncConnected").hidden=!connected;
-  if(!connected) setSyncStatus("Не подключена");
+  if(SYNC_SHARED_HOST) setSyncStatus("Недоступна на этом адресе");
+  else if(!connected) setSyncStatus("Не подключена");
 }
 function syncErrorText(error){
+  if(error.foreign) return "В gist лежит чужой или публичный файл синхронизации. Удалите его на GitHub и подключитесь снова.";
   if(error.status===401) return "Токен не подходит или истёк. Отключите синхронизацию и вставьте новый.";
   if(error.status===403 || error.status===404) return "У токена нет доступа к gist. Нужен токен с правом «gist».";
   if(!navigator.onLine) return "Нет сети. Синхронизирую, когда появится интернет.";
   return "Не удалось синхронизировать. Попробую позже.";
+}
+function withSyncLock(task){
+  return navigator.locks?.request ? navigator.locks.request("greek-vocabulary-sync", task) : task();
+}
+async function pickGist(cfg){
+  const gists=await listSyncGists(cfg.token);
+  if(!gists.length){
+    const requestedAt=Date.now();
+    const created=await gh("/gists", cfg.token, {method:"POST", body:JSON.stringify({
+      description:"Ελληνικά — мои слова: синхронизация прогресса", public:false,
+      files:{[SYNC_FILE]:{content:syncFileContent(localSyncDoc())}}
+    })});
+    learnServerClock(created.updated_at, requestedAt);
+    return {id:created.id, extra:[]};
+  }
+  return {id:gists[0].id, extra:gists.slice(1).map(g=>g.id)};
+}
+async function runSync(){
+  const cfg=syncConfig();
+  if(!cfg) return;
+  if(!cfg.gistId || !gistChecked){
+    const {id, extra}=await pickGist(cfg);
+    // A second gist appears if two devices connected at the same moment: fold it into the first.
+    for(const otherId of [...extra, ...(cfg.gistId && cfg.gistId!==id ? [cfg.gistId] : [])]){
+      try {
+        const other=await readGist(cfg.token, otherId);
+        if(other.doc && !applyMergedDoc(mergeSyncDocs(localSyncDoc(), other.doc, syncClock()))) throw new Error("local state busy");
+      } catch(error) { if(error.status!==404 && !error.foreign) throw error; }
+    }
+    cfg.gistId=id;
+    writeSyncConfig(cfg);
+    gistChecked=true;
+  }
+  for(let attempt=0; attempt<4; attempt++){
+    const requestedAt=Date.now();
+    const remote=await readGist(cfg.token, cfg.gistId);
+    learnServerClock(remote.updatedAt, requestedAt);
+    const local=localSyncDoc();
+    const merged=remote.doc ? mergeSyncDocs(local, remote.doc, syncClock()) : local;
+    if(!applyMergedDoc(merged)) continue;
+    if(remote.doc && sameSyncContent(remote.doc, merged)) return;
+    await gh("/gists/"+cfg.gistId, cfg.token, {method:"PATCH", body:JSON.stringify({
+      files:{[SYNC_FILE]:{content:syncFileContent(merged)}}
+    })});
+    // The gist has no conditional writes, so read it back: if another device wrote in between,
+    // the next round merges its changes too.
+    await new Promise(resolve=>setTimeout(resolve, 400+Math.random()*600));
+  }
 }
 function syncNow(){
   if(!syncConfig()) return Promise.resolve();
@@ -1940,33 +2054,10 @@ function syncNow(){
   syncRunning=(async()=>{
     do {
       syncAgain=false;
-      const cfg=syncConfig();
-      if(!cfg) break;
       setSyncStatus("Синхронизирую…");
       try {
-        if(!cfg.gistId){
-          cfg.gistId=await findOrCreateGist(cfg.token);
-          writeSyncConfig(cfg);
-        }
-        let remote;
-        try {
-          remote=await readGistDoc(cfg.token, cfg.gistId);
-        } catch(error) {
-          if(error.status!==404) throw error;
-          cfg.gistId=await findOrCreateGist(cfg.token);
-          writeSyncConfig(cfg);
-          remote=await readGistDoc(cfg.token, cfg.gistId);
-        }
-        const local=localSyncDoc();
-        const merged=remote ? mergeSyncDocs(local, remote) : local;
-        if(!applyMergedDoc(merged)) throw new Error("local save failed");
-        const content=doc=>JSON.stringify([doc.vocab, doc.vocabTime, doc.progress, doc.mtime]);
-        if(!remote || content(remote)!==content(merged)){
-          await gh("/gists/"+cfg.gistId, cfg.token, {method:"PATCH", body:JSON.stringify({
-            files:{[SYNC_FILE]:{content:JSON.stringify({...merged, updatedAt:new Date().toISOString()})}}
-          })});
-        }
-        setSyncStatus("Синхронизировано в "+new Date().toLocaleTimeString("ru",{hour:"2-digit",minute:"2-digit"}));
+        await withSyncLock(runSync);
+        if(syncConfig()) setSyncStatus("Синхронизировано в "+new Date().toLocaleTimeString("ru",{hour:"2-digit",minute:"2-digit"}));
       } catch(error) {
         setSyncStatus(syncErrorText(error), true);
         break;
@@ -1990,6 +2081,7 @@ $("#syncConnectBtn").onclick=async()=>{
     return setSyncStatus(syncErrorText(error), true);
   }
   writeSyncConfig({token});
+  gistChecked=false;
   $("#syncToken").value="";
   renderSyncUi();
   syncNow();
@@ -1999,7 +2091,7 @@ $("#syncOffBtn").onclick=()=>{
   writeSyncConfig(null);
   clearTimeout(syncTimer);
   renderSyncUi();
-  setSyncStatus("Отключена на этом устройстве. Прогресс остался здесь и в gist.");
+  setSyncStatus("Отключена на этом устройстве. Токен удалён, прогресс остался здесь и в gist.");
 };
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible") scheduleSync(300);
