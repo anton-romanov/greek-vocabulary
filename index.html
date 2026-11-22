@@ -247,7 +247,7 @@ button{cursor:pointer}
     <div class="sync-box">
       <h3>Синхронизация между устройствами</h3>
       <div class="sync-status" id="syncStatus" role="status">Не подключена</div>
-      <p class="note" id="syncHelp">Прогресс и словарь хранятся в приватном gist на вашем GitHub. На каждом устройстве один раз вставьте токен GitHub с доступом только к gist: <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=%CE%95%CE%BB%CE%BB%CE%B7%CE%BD%CE%B9%CE%BA%CE%AC%20sync" target="_blank" rel="noopener">создать токен</a> (отметьте только право «gist» и задайте срок, например 90 дней). Токен хранится только в этом браузере.</p>
+      <p class="note" id="syncHelp">Прогресс и словарь хранятся в секретном gist на вашем GitHub: его нет в поиске и списках, но открыть его может любой, у кого есть ссылка. На каждом устройстве один раз вставьте токен GitHub с доступом только к gist: <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=%CE%95%CE%BB%CE%BB%CE%B7%CE%BD%CE%B9%CE%BA%CE%AC%20sync" target="_blank" rel="noopener">создать токен</a> (отметьте только право «gist» и задайте срок, например 90 дней). Токен хранится только в этом браузере.</p>
       <div class="sync-row" id="syncSetup">
         <input class="control" id="syncToken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Токен GitHub (ghp_… или github_pat_…)" aria-label="Токен GitHub">
         <button class="btn primary" id="syncConnectBtn" type="button">Подключить</button>
@@ -1783,7 +1783,7 @@ $$(".tab").forEach(t=>t.onclick=()=>{
 // ---- Sync through a private GitHub gist ----
 // Every word and every progress entry carries its own change time. On sync the newer side wins
 // per item, deletions are kept as times without an item, and ties go to the version that
-// differs from the built-in catalog (or to the gist). Change times follow GitHub's clock.
+// differs from the built-in catalog (or to the gist). Untimed words are never dropped. Change times follow GitHub's clock.
 // The token stays on this device, is never exported, and sync is off on shared github.io hosts.
 const SYNC_KEY = "greekNotebookSync";
 const SYNC_META_KEY = "greekNotebookSyncMeta";
@@ -1795,6 +1795,7 @@ let applyingRemote = false;
 let syncRunning = null;
 let syncAgain = false;
 let syncTimer;
+let wroteGist = false;
 let gistCheckedAt = 0;
 
 function syncConfig(){
@@ -1854,12 +1855,11 @@ function progressTime(doc, key){
   const t=doc.mtime[key];
   return Number.isFinite(t) ? t : (doc.progress[key]?.last || 0);
 }
-// Every device starts with the whole catalog, so a catalog word missing without a recorded
-// time was removed or edited before sync was turned on: it counts as an early deletion.
-function wordTime(doc, id, present){
+// Only recorded changes count. A word missing without a recorded time may simply be a catalog
+// word an older install never received, so it is kept rather than treated as deleted.
+function wordTime(doc, id){
   const t=doc.vtime[id];
-  if(Number.isFinite(t)) return t;
-  return !present && catalog.has(id) ? 1 : 0;
+  return Number.isFinite(t) ? t : 0;
 }
 function catalogWord(id){
   const entry=catalog.get(id);
@@ -1882,12 +1882,12 @@ function mergeSyncDocs(local, remote, now){
   const lm=wordsById(local.vocab), rm=wordsById(remote.vocab), chosen=new Map(), vtimeOut={};
   for(const id of new Set([...lm.keys(), ...rm.keys(), ...Object.keys(local.vtime), ...Object.keys(remote.vtime)])){
     const lw=lm.get(id), rw=rm.get(id);
-    const lt=clamp(wordTime(local,id,!!lw)), rt=clamp(wordTime(remote,id,!!rw));
+    const lt=clamp(wordTime(local,id)), rt=clamp(wordTime(remote,id));
     let word;
     if(lt>rt) word=lw;
     else if(rt>lt) word=rw;
     else if(lw && rw) word=JSON.stringify(rw)!==JSON.stringify(lw) && JSON.stringify(rw)===catalogWord(id) ? lw : rw;
-    else word=lw ?? rw;
+    else word=(!lw && id in local.vtime) || (!rw && id in remote.vtime) ? undefined : lw ?? rw;
     if(word) chosen.set(id, word);
     if(Math.max(lt,rt)) vtimeOut[id]=Math.max(lt,rt);
   }
@@ -2017,9 +2017,12 @@ async function pickGist(cfg){
   }
   return {id:gists[0].id, extra:gists.slice(1).map(g=>g.id)};
 }
+class SyncStopped extends Error {}
 async function runSync(){
   const cfg=syncConfig();
   if(!cfg) return;
+  // The user may disconnect while requests are in flight: never write the token back then.
+  const stillConnected=()=>{ if(syncConfig()?.token!==cfg.token) throw new SyncStopped(); };
   if(!cfg.gistId || Date.now()-gistCheckedAt>5*60*1000){
     const {id, extra}=await pickGist(cfg);
     // A second gist appears if two devices connected at the same moment: fold it into the first.
@@ -2029,21 +2032,26 @@ async function runSync(){
         if(other.doc && !applyMergedDoc(mergeSyncDocs(localSyncDoc(), other.doc, syncClock()))) throw new Error("local state busy");
       } catch(error) { if(error.status!==404 && !error.foreign) throw error; }
     }
+    stillConnected();
     cfg.gistId=id;
     writeSyncConfig(cfg);
     gistCheckedAt=Date.now();
   }
   for(let attempt=0; attempt<4; attempt++){
+    stillConnected();
     const remote=await readGist(cfg.token, cfg.gistId);
+    stillConnected();
     const local=localSyncDoc();
     const merged=remote.doc ? mergeSyncDocs(local, remote.doc, syncClock()) : local;
     if(!applyMergedDoc(merged)) continue;
     if(remote.doc && sameSyncContent(remote.doc, merged)) return;
+    stillConnected();
     const requestedAt=Date.now();
     const written=await gh("/gists/"+cfg.gistId, cfg.token, {method:"PATCH", body:JSON.stringify({
       files:{[SYNC_FILE]:{content:syncFileContent(merged)}}
     })});
     learnServerClock(written?.updated_at, requestedAt);
+    wroteGist=true;
     // The gist has no conditional writes, so read it back: if another device wrote in between,
     // the next round merges its changes too.
     await new Promise(resolve=>setTimeout(resolve, 400+Math.random()*600));
@@ -2058,10 +2066,13 @@ function syncNow(){
       syncAgain=false;
       setSyncStatus("Синхронизирую…");
       try {
+        wroteGist=false;
         await withSyncLock(runSync);
+        // Another device may have written right after us; check once more a little later.
+        if(wroteGist) scheduleSync(20000);
         if(syncConfig()) setSyncStatus("Синхронизировано в "+new Date().toLocaleTimeString("ru",{hour:"2-digit",minute:"2-digit"}));
       } catch(error) {
-        setSyncStatus(syncErrorText(error), true);
+        if(!(error instanceof SyncStopped)) setSyncStatus(syncErrorText(error), true);
         break;
       }
     } while(syncAgain);
