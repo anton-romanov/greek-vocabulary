@@ -1459,6 +1459,7 @@ function showExample(target,word,visible){
     '<div class="example-title">Как это говорят</div><p>Для этой карточки примеры пока не добавлены. Выберите «Только с примерами», чтобы учить слова с примерами.</p>';
 }
 function say(text){
+  if(!("speechSynthesis" in window)) return;
   const u=new SpeechSynthesisUtterance(text);
   u.lang="el-GR"; u.rate=.85; speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
@@ -1614,8 +1615,7 @@ function renderList(){
 $("#wordList").onclick=e=>{
   const speak=e.target.closest("[data-speak]"), fav=e.target.closest("[data-fav]"), edit=e.target.closest("[data-edit]");
   if(speak){
-    const w=vocab[+speak.dataset.speak], u=new SpeechSynthesisUtterance(w.greek);
-    u.lang="el-GR"; u.rate=.85; speechSynthesis.cancel(); speechSynthesis.speak(u);
+    say(vocab[+speak.dataset.speak].greek);
   } else if(fav){
     const w=vocab[+fav.dataset.fav], k=idOf(w), p=pFor(w);
     if(saveState(vocab, {...progress, [k]:{...p, fav:!p.fav}})){
