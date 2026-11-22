@@ -1801,6 +1801,15 @@ function syncMeta(){
 function writeSyncMeta(meta){
   try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta)); } catch {}
 }
+function syncDevice(){
+  let id;
+  try { id=localStorage.getItem("greekNotebookDevice"); } catch {}
+  if(!/^[a-z0-9]{16,40}$/.test(id||"")){
+    id=Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>b.toString(36).padStart(2,"0")).join("").slice(0,24);
+    try { localStorage.setItem("greekNotebookDevice", id); } catch {}
+  }
+  return id;
+}
 function syncClock(meta=syncMeta()){
   return Date.now()+meta.offset;
 }
@@ -1901,7 +1910,7 @@ async function runSync(){
   for(let attempt=0; attempt<3; attempt++){
     const sentState=storedState;
     meta=syncMeta();
-    const data=await syncRequest("POST", {doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
+    const data=await syncRequest("POST", {device:syncDevice(), doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
     if(applyServerDoc(data.doc, sentState)) return;
   }
   throw new Error("busy");
@@ -1943,9 +1952,8 @@ document.addEventListener("visibilitychange",()=>{
   else if(syncTimer){ clearTimeout(syncTimer); syncNow(); }
 });
 window.addEventListener("online",()=>scheduleSync(500));
-// Check in regularly while the app is open: picks up other devices' changes and re-sends this
-// device's state in case two devices wrote at the same moment and one write was overwritten.
-setInterval(()=>{ if(document.visibilityState==="visible") scheduleSync(0); }, 60000);
+// Check in regularly while the app is open to pick up other devices' changes.
+setInterval(()=>{ if(document.visibilityState==="visible") scheduleSync(0); }, 5*60000);
 
 window.addEventListener("storage", event=>{
   if(event.key===STATE_KEY || event.key===null) syncState(readRaw(STATE_KEY));

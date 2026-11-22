@@ -95,12 +95,38 @@ export function mergeDocs(stored, incoming, now) {
   return { vocab, vtime, progress, mtime };
 }
 
+// Each device keeps its own record (state:<user>:<device>) and only ever writes that one, so two
+// devices syncing at the same moment cannot overwrite each other. Reading merges all records.
+const DEVICE = /^[a-z0-9]{16,40}$/;
+
+async function loadAll(env, user, device) {
+  const prefix = `state:${user}:`;
+  const keys = new Set();
+  let cursor;
+  do {
+    const page = await env.STATE.list({ prefix, cursor });
+    for (const k of page.keys) keys.add(k.name);
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  // A just-created record may not be listed yet; always include this device's own.
+  if (device) keys.add(prefix + device);
+  const now = Date.now();
+  let all = cleanDoc({}), own = cleanDoc({});
+  for (const key of keys) {
+    const doc = cleanDoc((await env.STATE.get(key, "json")) || {});
+    if (key === prefix + device) own = doc;
+    all = mergeDocs(all, doc, now);
+  }
+  return { all, own };
+}
+
 export async function onRequest({ request, env, data }) {
   if (!data.user) return json({ error: "unauthorized" }, 401);
-  const key = "state:" + data.user;
-  const stored = cleanDoc((await env.STATE.get(key, "json")) || {});
 
-  if (request.method === "GET") return json({ doc: stored, serverTime: Date.now() });
+  if (request.method === "GET") {
+    const { all } = await loadAll(env, data.user, null);
+    return json({ doc: all, serverTime: Date.now() });
+  }
   if (request.method !== "POST") return json({ error: "method" }, 405);
 
   // Only the app itself may write: a JSON body (which a plain cross-site form cannot send)
@@ -119,14 +145,14 @@ export async function onRequest({ request, env, data }) {
   if (raw.length > MAX_BODY) return json({ error: "too large" }, 413);
   let body;
   try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
+  const device = body?.device;
+  if (typeof device !== "string" || !DEVICE.test(device)) return json({ error: "bad device" }, 400);
 
-  // KV has no compare-and-swap, so two devices writing at the same moment can overwrite each
-  // other's merge. That only delays a change: every device sends its full state on each sync,
-  // so the next sync from that device merges it back in.
-  const merged = mergeDocs(stored, cleanDoc(body?.doc), Date.now());
-  if (JSON.stringify(merged) !== JSON.stringify(stored)) {
+  const { all, own } = await loadAll(env, data.user, device);
+  const merged = mergeDocs(all, cleanDoc(body?.doc), Date.now());
+  if (JSON.stringify(merged) !== JSON.stringify(own)) {
     try {
-      await env.STATE.put(key, JSON.stringify(merged));
+      await env.STATE.put(`state:${data.user}:${device}`, JSON.stringify(merged));
     } catch {
       return json({ error: "busy" }, 503);
     }

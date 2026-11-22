@@ -10,4 +10,4 @@ fi
 rm -rf dist
 mkdir dist
 cp index.html sw.js manifest.webmanifest icon-192.png icon-512.png _headers dist/
-npx -y wrangler@4 pages deploy --project-name greek-vocabulary --branch main --commit-dirty=true
+npx -y wrangler@4.166.0 pages deploy --project-name greek-vocabulary --branch main --commit-dirty=true

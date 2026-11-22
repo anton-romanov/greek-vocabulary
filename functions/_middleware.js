@@ -7,6 +7,7 @@
 const COOKIE = "gv_session";
 const SESSION_DAYS = 400;
 const RENEW_AFTER = 24 * 60 * 60;
+const GENERATED_PASSWORD = /^[a-z0-9]{4}(-[a-z0-9]{4}){3}$/;
 const PUBLIC = new Set(["/manifest.webmanifest", "/icon-192.png", "/icon-512.png"]);
 
 const enc = new TextEncoder();
@@ -129,10 +130,14 @@ export async function onRequest(context) {
   }
 
   if (url.pathname === "/login" && request.method === "POST") {
-    const form = await request.formData().catch(() => null);
+    if (Number(request.headers.get("Content-Length") || 0) > 4096) return loginPage("Неверный логин или пароль");
+    const raw = await request.text();
+    if (raw.length > 4096) return loginPage("Неверный логин или пароль");
+    const form = new URLSearchParams(raw);
     const login = String(form?.get("login") || "").trim();
     const password = String(form?.get("password") || "");
-    const ok = (await passwordMatches(password, env.APP_PASSWORD_HASH)) && login === env.APP_LOGIN;
+    // Only passwords in the generated format are accepted, so a weak hand-picked one never works.
+    const ok = GENERATED_PASSWORD.test(password) && (await passwordMatches(password, env.APP_PASSWORD_HASH)) && login === env.APP_LOGIN;
     if (!ok) return loginPage("Неверный логин или пароль", login);
     return new Response(null, {
       status: 303,
