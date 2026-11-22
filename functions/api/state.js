@@ -3,6 +3,26 @@
 
 const MAX_BODY = 4 * 1024 * 1024;
 const FUTURE_SLACK = 10 * 60 * 1000;
+// Reads the body but stops as soon as it passes the limit (null), even without Content-Length.
+export async function readLimited(request, limit) {
+  if (Number(request.headers.get("Content-Length") || 0) > limit) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > limit) { await reader.cancel().catch(() => {}); return null; }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { bytes.set(c, at); at += c.length; }
+  return new TextDecoder().decode(bytes);
+}
+
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -96,28 +116,37 @@ export function mergeDocs(stored, incoming, now) {
 }
 
 // Each device keeps its own record (state:<user>:<device>) and only ever writes that one, so two
-// devices syncing at the same moment cannot overwrite each other. Reading merges all records.
+// devices syncing at the same moment cannot overwrite each other. Every write stores the merge of
+// all records the server saw plus the device's own changes, so a newer record already contains
+// what older ones held. That is why reading the newest few is enough and old ones can be dropped.
 const DEVICE = /^[a-z0-9]{16,40}$/;
+const READ_NEWEST = 10;
+const DROP_AFTER = 24 * 60 * 60 * 1000;
+const MAX_DROPS = 3;
 
 async function loadAll(env, user, device) {
   const prefix = `state:${user}:`;
-  const keys = new Set();
+  const records = [];
   let cursor;
   do {
     const page = await env.STATE.list({ prefix, cursor });
-    for (const k of page.keys) keys.add(k.name);
+    for (const k of page.keys) records.push({ name: k.name, t: Number(k.metadata?.t) || 0 });
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
-  // A just-created record may not be listed yet; always include this device's own.
-  if (device) keys.add(prefix + device);
+  records.sort((a, b) => b.t - a.t);
   const now = Date.now();
+  const read = records.slice(0, READ_NEWEST).map(r => r.name);
+  // A just-created record may not be listed yet; always include this device's own.
+  if (device && !read.includes(prefix + device)) read.push(prefix + device);
+  // Records outside the newest few that have not changed for a day are covered by newer ones.
+  const stale = records.slice(READ_NEWEST).filter(r => now - r.t > DROP_AFTER && r.name !== prefix + device);
   let all = cleanDoc({}), own = cleanDoc({});
-  for (const key of keys) {
+  for (const key of read) {
     const doc = cleanDoc((await env.STATE.get(key, "json")) || {});
     if (key === prefix + device) own = doc;
     all = mergeDocs(all, doc, now);
   }
-  return { all, own };
+  return { all, own, stale: stale.slice(0, MAX_DROPS).map(r => r.name) };
 }
 
 export async function onRequest({ request, env, data }) {
@@ -139,23 +168,22 @@ export async function onRequest({ request, env, data }) {
     return json({ error: "forbidden" }, 403);
   }
 
-  const length = Number(request.headers.get("Content-Length") || 0);
-  if (length > MAX_BODY) return json({ error: "too large" }, 413);
-  const raw = await request.text();
-  if (raw.length > MAX_BODY) return json({ error: "too large" }, 413);
+  const raw = await readLimited(request, MAX_BODY);
+  if (raw === null) return json({ error: "too large" }, 413);
   let body;
   try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
   const device = body?.device;
   if (typeof device !== "string" || !DEVICE.test(device)) return json({ error: "bad device" }, 400);
 
-  const { all, own } = await loadAll(env, data.user, device);
+  const { all, own, stale } = await loadAll(env, data.user, device);
   const merged = mergeDocs(all, cleanDoc(body?.doc), Date.now());
   if (JSON.stringify(merged) !== JSON.stringify(own)) {
     try {
-      await env.STATE.put(`state:${data.user}:${device}`, JSON.stringify(merged));
+      await env.STATE.put(`state:${data.user}:${device}`, JSON.stringify(merged), { metadata: { t: Date.now() } });
     } catch {
       return json({ error: "busy" }, 503);
     }
+    for (const key of stale) await env.STATE.delete(key).catch(() => {});
   }
   return json({ doc: merged, serverTime: Date.now() });
 }

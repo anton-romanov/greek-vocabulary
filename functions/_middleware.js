@@ -4,6 +4,8 @@
 // SESSION_SECRET (any long random string). Changing SESSION_SECRET or the password signs every
 // browser out; that is the way to revoke a lost device.
 
+import { readLimited } from "./api/state.js";
+
 const COOKIE = "gv_session";
 const SESSION_DAYS = 400;
 const RENEW_AFTER = 24 * 60 * 60;
@@ -130,9 +132,8 @@ export async function onRequest(context) {
   }
 
   if (url.pathname === "/login" && request.method === "POST") {
-    if (Number(request.headers.get("Content-Length") || 0) > 4096) return loginPage("Неверный логин или пароль");
-    const raw = await request.text();
-    if (raw.length > 4096) return loginPage("Неверный логин или пароль");
+    const raw = await readLimited(request, 4096);
+    if (raw === null) return loginPage("Неверный логин или пароль");
     const form = new URLSearchParams(raw);
     const login = String(form?.get("login") || "").trim();
     const password = String(form?.get("password") || "");

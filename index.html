@@ -1807,6 +1807,10 @@ function syncDevice(){
   if(!/^[a-z0-9]{16,40}$/.test(id||"")){
     id=Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>b.toString(36).padStart(2,"0")).join("").slice(0,24);
     try { localStorage.setItem("greekNotebookDevice", id); } catch {}
+    // Without a lasting id every sync would look like a new device: do not sync then.
+    let kept;
+    try { kept=localStorage.getItem("greekNotebookDevice"); } catch {}
+    if(kept!==id) throw new Error("no device id");
   }
   return id;
 }
