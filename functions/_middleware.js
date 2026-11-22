@@ -2,13 +2,12 @@
 // The login is checked once, then a signed cookie keeps this browser signed in for a year.
 // Settings (Pages secrets): APP_LOGIN, APP_PASSWORD_HASH ("sha256$salt$hash", base64url; made by tools/new-password.mjs),
 // SESSION_SECRET (any long random string). Changing SESSION_SECRET or the password signs every
-// browser out; that is the way to revoke a lost device.
+// browser out; deleting one session:<id> record in KV signs out just that device.
 
 import { readLimited } from "./api/state.js";
 
 const COOKIE = "gv_session";
 const SESSION_DAYS = 400;
-const RENEW_AFTER = 24 * 60 * 60;
 const GENERATED_PASSWORD = /^[a-z0-9]{4}(-[a-z0-9]{4}){3}$/;
 const PUBLIC = new Set(["/manifest.webmanifest", "/icon-192.png", "/icon-512.png"]);
 
@@ -42,8 +41,15 @@ async function signingKey(env) {
     { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 
-async function makeSession(env, login) {
-  const body = b64url(enc.encode(login)) + "." + Math.floor(Date.now() / 1000);
+// A session is "<login>.<issued>.<id>.<signature>". It lasts SESSION_DAYS from sign-in and is
+// never extended. Each one also has a record session:<id> in KV (with the device's user agent),
+// so a lost device can be signed out alone by deleting its record in the Cloudflare dashboard.
+async function makeSession(env, login, request) {
+  const id = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  await env.STATE.put("session:" + id, JSON.stringify({
+    login, at: new Date().toISOString(), device: (request.headers.get("User-Agent") || "").slice(0, 200),
+  }), { expirationTtl: SESSION_DAYS * 86400 });
+  const body = b64url(enc.encode(login)) + "." + Math.floor(Date.now() / 1000) + "." + id;
   const sig = await crypto.subtle.sign("HMAC", await signingKey(env), enc.encode(body));
   return body + "." + b64url(sig);
 }
@@ -51,15 +57,17 @@ async function makeSession(env, login) {
 async function readSession(env, request) {
   const cookie = (request.headers.get("Cookie") || "").split(/;\s*/).find(c => c.startsWith(COOKIE + "="));
   if (!cookie) return null;
-  const [user, issued, sig] = cookie.slice(COOKIE.length + 1).split(".");
-  if (!user || !issued || !sig) return null;
+  const [user, issued, id, sig] = cookie.slice(COOKIE.length + 1).split(".");
+  if (!user || !issued || !id || !sig) return null;
   try {
     const ok = await crypto.subtle.verify("HMAC", await signingKey(env), fromB64url(sig),
-      enc.encode(user + "." + issued));
+      enc.encode(user + "." + issued + "." + id));
     const age = Date.now() / 1000 - Number(issued);
     if (!ok || !(age >= -300 && age < SESSION_DAYS * 86400)) return null;
     const login = new TextDecoder().decode(fromB64url(user));
-    return login === env.APP_LOGIN ? { login, age } : null;
+    if (login !== env.APP_LOGIN) return null;
+    if ((await env.STATE.get("session:" + id)) === null) return null;
+    return { login };
   } catch {
     return null;
   }
@@ -142,7 +150,7 @@ export async function onRequest(context) {
     if (!ok) return loginPage("Неверный логин или пароль", login);
     return new Response(null, {
       status: 303,
-      headers: { Location: "/", "Set-Cookie": sessionCookie(await makeSession(env, login)), "Cache-Control": "no-store" },
+      headers: { Location: "/", "Set-Cookie": sessionCookie(await makeSession(env, login, request)), "Cache-Control": "no-store" },
     });
   }
   if (PUBLIC.has(url.pathname)) return next();
@@ -159,9 +167,5 @@ export async function onRequest(context) {
 
   context.data.user = session.login;
   const response = withFrameProtection(await next());
-  // Keep the browser signed in while it is in use.
-  if (session.age > RENEW_AFTER) {
-    response.headers.append("Set-Cookie", sessionCookie(await makeSession(env, session.login)));
-  }
   return response;
 }

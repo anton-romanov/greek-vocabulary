@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://gist.githubusercontent.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="theme-color" content="#f6f7f3">
 <title>Ελληνικά — мои слова</title>
 <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
@@ -1786,7 +1786,56 @@ let syncAgain = false;
 let syncTimer;
 let syncOffline = false;
 
-try { localStorage.removeItem("greekNotebookSync"); } catch {}
+// One-time move from the old GitHub gist sync: if this browser was connected to a gist, its
+// contents are sent to the server once, then the old token is forgotten.
+const LEGACY_SYNC_KEY = "greekNotebookSync";
+const LEGACY_SYNC_FILE = "greek-vocabulary-sync.json";
+async function legacyGh(url, token){
+  const res=await fetch(url, {cache:"no-store", credentials:"omit", headers:{
+    "Accept":"application/vnd.github+json", "Authorization":"Bearer "+token, "X-GitHub-Api-Version":"2022-11-28"}});
+  if(!res.ok) throw Object.assign(new Error("GitHub "+res.status), {status:res.status});
+  return res.json();
+}
+async function readLegacyGist(token){
+  const found=[];
+  for(let page=1; page<=10; page++){
+    const list=await legacyGh(`https://api.github.com/gists?per_page=100&page=${page}`, token);
+    found.push(...list.filter(g=>g.public===false && g.files && g.files[LEGACY_SYNC_FILE]));
+    if(list.length<100) break;
+  }
+  found.sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)));
+  if(!found.length) return null;
+  const gist=await legacyGh("https://api.github.com/gists/"+encodeURIComponent(found[0].id), token);
+  const file=gist.public===false ? gist.files?.[LEGACY_SYNC_FILE] : null;
+  if(!file) return null;
+  let text=file.content;
+  if(file.truncated){
+    const raw=new URL(file.raw_url);
+    if(raw.origin!=="https://gist.githubusercontent.com") return null;
+    const res=await fetch(raw, {cache:"no-store", credentials:"omit"});
+    if(!res.ok) throw new Error("raw "+res.status);
+    text=await res.text();
+  }
+  const doc=parseStored(text);
+  if(doc?.app!=="greek-vocabulary" || !Array.isArray(doc.vocab)) return null;
+  return {vocab:normalizeVocab(doc.vocab.filter(isWord), CATALOG_VERSION), vtime:timeMap(doc.vtime),
+    progress:normalizeProgress(doc.progress), mtime:timeMap(doc.mtime)};
+}
+async function importLegacyGist(){
+  const cfg=parseStored(readRaw(LEGACY_SYNC_KEY));
+  if(!cfg) return;
+  const forget=()=>{ try { localStorage.removeItem(LEGACY_SYNC_KEY); } catch {} };
+  if(typeof cfg.token!=="string" || !cfg.token){ forget(); return; }
+  let doc;
+  try { doc=await readLegacyGist(cfg.token); }
+  catch(error){
+    // A revoked token or missing gist will never work; a network error is retried next sync.
+    if(error.status===401 || error.status===403 || error.status===404) forget();
+    return;
+  }
+  if(doc) await syncRequest("POST", {device:syncDevice(), doc});
+  forget();
+}
 
 function timeMap(value){
   return value && typeof value==="object" && !Array.isArray(value) ?
@@ -1911,6 +1960,7 @@ async function runSync(){
   if(!syncMeta().clockKnown) await syncRequest("GET");
   let meta=syncMeta();
   if(!meta.seeded){ seedLocalChanges(meta); writeSyncMeta(meta); }
+  await importLegacyGist();
   for(let attempt=0; attempt<3; attempt++){
     const sentState=storedState;
     meta=syncMeta();
