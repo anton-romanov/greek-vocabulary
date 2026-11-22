@@ -31,6 +31,7 @@ function json(body, status = 200) {
 }
 
 const isObject = v => v && typeof v === "object" && !Array.isArray(v);
+const own_ = (obj, key) => (Object.hasOwn(obj, key) ? obj[key] : undefined);
 const own = (obj, key) => (Object.hasOwn(obj, key) ? obj[key] : undefined);
 const text = v => (typeof v === "string" ? v : "");
 
@@ -146,7 +147,14 @@ async function loadAll(env, user, device) {
     if (key === prefix + device) own = doc;
     all = mergeDocs(all, doc, now);
   }
-  return { all, own, stale: stale.slice(0, MAX_DROPS).map(r => r.name) };
+  // Drop an old record only when everything in it is already in what was read.
+  const covered = (doc, field) => Object.entries(doc[field]).every(([k, t]) => (own_(all[field], k) ?? -1) >= t);
+  const drop = [];
+  for (const r of stale.slice(0, MAX_DROPS)) {
+    const doc = cleanDoc((await env.STATE.get(r.name, "json")) || {});
+    if (covered(doc, "vtime") && covered(doc, "mtime")) drop.push(r.name);
+  }
+  return { all, own, stale: drop };
 }
 
 export async function onRequest({ request, env, data }) {
