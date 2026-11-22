@@ -1795,7 +1795,7 @@ let applyingRemote = false;
 let syncRunning = null;
 let syncAgain = false;
 let syncTimer;
-let gistChecked = false;
+let gistCheckedAt = 0;
 
 function syncConfig(){
   if(SYNC_SHARED_HOST) return null;
@@ -1953,6 +1953,7 @@ async function readGist(token, gistId){
   if(!doc) throw Object.assign(new Error("foreign file"), {foreign:true});
   return {doc, updatedAt:gist.updated_at};
 }
+// Only the gist returned by our own write carries GitHub's current time in updated_at.
 function learnServerClock(updatedAt, requestedAt){
   const server=Date.parse(updatedAt);
   if(!Number.isFinite(server)) return;
@@ -2019,7 +2020,7 @@ async function pickGist(cfg){
 async function runSync(){
   const cfg=syncConfig();
   if(!cfg) return;
-  if(!cfg.gistId || !gistChecked){
+  if(!cfg.gistId || Date.now()-gistCheckedAt>5*60*1000){
     const {id, extra}=await pickGist(cfg);
     // A second gist appears if two devices connected at the same moment: fold it into the first.
     for(const otherId of [...extra, ...(cfg.gistId && cfg.gistId!==id ? [cfg.gistId] : [])]){
@@ -2030,23 +2031,24 @@ async function runSync(){
     }
     cfg.gistId=id;
     writeSyncConfig(cfg);
-    gistChecked=true;
+    gistCheckedAt=Date.now();
   }
   for(let attempt=0; attempt<4; attempt++){
-    const requestedAt=Date.now();
     const remote=await readGist(cfg.token, cfg.gistId);
-    learnServerClock(remote.updatedAt, requestedAt);
     const local=localSyncDoc();
     const merged=remote.doc ? mergeSyncDocs(local, remote.doc, syncClock()) : local;
     if(!applyMergedDoc(merged)) continue;
     if(remote.doc && sameSyncContent(remote.doc, merged)) return;
-    await gh("/gists/"+cfg.gistId, cfg.token, {method:"PATCH", body:JSON.stringify({
+    const requestedAt=Date.now();
+    const written=await gh("/gists/"+cfg.gistId, cfg.token, {method:"PATCH", body:JSON.stringify({
       files:{[SYNC_FILE]:{content:syncFileContent(merged)}}
     })});
+    learnServerClock(written?.updated_at, requestedAt);
     // The gist has no conditional writes, so read it back: if another device wrote in between,
     // the next round merges its changes too.
     await new Promise(resolve=>setTimeout(resolve, 400+Math.random()*600));
   }
+  throw new Error("sync did not settle");
 }
 function syncNow(){
   if(!syncConfig()) return Promise.resolve();
@@ -2081,7 +2083,7 @@ $("#syncConnectBtn").onclick=async()=>{
     return setSyncStatus(syncErrorText(error), true);
   }
   writeSyncConfig({token});
-  gistChecked=false;
+  gistCheckedAt=0;
   $("#syncToken").value="";
   renderSyncUi();
   syncNow();
