@@ -2,10 +2,7 @@ name = "greek-vocabulary"
 pages_build_output_dir = "dist"
 compatibility_date = "2025-09-01"
 
-[vars]
-TEAM_DOMAIN = "romanovio.cloudflareaccess.com"
-POLICY_AUD = "8d8c49fe56b78546c2a8ed37aad8fb90f243d314f1494e03913de9dbd1ce419a"
 
 [[kv_namespaces]]
 binding = "STATE"
-id = "KV_NAMESPACE_ID"
+id = "434234e9d75344b7b5be2dc6d08f07b6"

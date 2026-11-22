@@ -246,7 +246,7 @@ button{cursor:pointer}
     <div class="sync-box">
       <h3>Синхронизация между устройствами</h3>
       <div class="sync-status" id="syncStatus" role="status">Подключаюсь…</div>
-      <p class="note">Прогресс и ваши правки слов сохраняются автоматически и появляются на всех устройствах, где вы вошли по коду из почты.</p>
+      <p class="note">Прогресс и ваши правки слов сохраняются автоматически и появляются на всех устройствах, где вы вошли под своим логином.</p>
       <div class="sync-actions"><button class="btn" id="syncNowBtn" type="button">Синхронизировать сейчас</button></div>
     </div>
     <div style="margin-top:22px;display:grid;gap:10px">
@@ -1919,7 +1919,7 @@ function syncNow(){
         setSyncStatus("Сохранено на всех устройствах · "+new Date().toLocaleTimeString("ru",{hour:"2-digit",minute:"2-digit"}));
       } catch(error) {
         syncOffline=!error.signedOut;
-        setSyncStatus(error.signedOut ? "Вход истёк. Обновите страницу и войдите по коду из почты." :
+        setSyncStatus(error.signedOut ? "Нужно войти заново: обновите страницу." :
           !navigator.onLine ? "Нет сети. Прогресс сохранён здесь и уйдёт, когда появится интернет." :
           "Не удалось сохранить. Попробую ещё раз.", true);
         break;

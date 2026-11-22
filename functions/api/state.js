@@ -1,59 +1,13 @@
 // Stores one learner's words and progress in Workers KV and merges what each device sends.
-// Cloudflare Access sits in front of the site; this function checks the Access token itself too,
-// so the email used as the storage key always comes from a verified login.
+// functions/_middleware.js checks the login first and passes the signed-in user in data.user.
 
 const MAX_BODY = 4 * 1024 * 1024;
 const FUTURE_SLACK = 10 * 60 * 1000;
-let certsCache = { at: 0, keys: [] };
-
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   });
-}
-
-function base64UrlBytes(part) {
-  const text = atob(part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "="));
-  return Uint8Array.from(text, c => c.charCodeAt(0));
-}
-
-async function accessKeys(teamDomain, refresh = false) {
-  if (!refresh && Date.now() - certsCache.at < 60 * 60 * 1000 && certsCache.keys.length) return certsCache.keys;
-  const res = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`);
-  if (!res.ok) throw new Error("certs " + res.status);
-  const { keys } = await res.json();
-  certsCache = { at: Date.now(), keys: keys || [] };
-  return certsCache.keys;
-}
-
-async function verifiedEmail(request, env) {
-  const url = new URL(request.url);
-  if (env.DEV_EMAIL && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) return env.DEV_EMAIL;
-  const token = request.headers.get("Cf-Access-Jwt-Assertion");
-  if (!token || !env.TEAM_DOMAIN || !env.POLICY_AUD) return null;
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const header = JSON.parse(new TextDecoder().decode(base64UrlBytes(parts[0])));
-    const payload = JSON.parse(new TextDecoder().decode(base64UrlBytes(parts[1])));
-    if (header.alg !== "RS256") return null;
-    // Access rotates its signing keys: fetch them again once if this kid is new.
-    let jwk = (await accessKeys(env.TEAM_DOMAIN)).find(k => k.kid === header.kid);
-    if (!jwk) jwk = (await accessKeys(env.TEAM_DOMAIN, true)).find(k => k.kid === header.kid);
-    if (!jwk) return null;
-    const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
-    const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, base64UrlBytes(parts[2]),
-      new TextEncoder().encode(parts[0] + "." + parts[1]));
-    if (!ok) return null;
-    const now = Date.now() / 1000;
-    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!aud.includes(env.POLICY_AUD) || payload.iss !== `https://${env.TEAM_DOMAIN}`) return null;
-    if (!(payload.exp > now) || (payload.nbf && payload.nbf > now + 60)) return null;
-    return typeof payload.email === "string" && payload.email ? payload.email.toLowerCase() : null;
-  } catch {
-    return null;
-  }
 }
 
 const isObject = v => v && typeof v === "object" && !Array.isArray(v);
@@ -141,10 +95,9 @@ export function mergeDocs(stored, incoming, now) {
   return { vocab, vtime, progress, mtime };
 }
 
-export async function onRequest({ request, env }) {
-  const email = await verifiedEmail(request, env);
-  if (!email) return json({ error: "unauthorized" }, 401);
-  const key = "state:" + email;
+export async function onRequest({ request, env, data }) {
+  if (!data.user) return json({ error: "unauthorized" }, 401);
+  const key = "state:" + data.user;
   const stored = cleanDoc((await env.STATE.get(key, "json")) || {});
 
   if (request.method === "GET") return json({ doc: stored, serverTime: Date.now() });
