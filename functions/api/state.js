@@ -45,10 +45,16 @@ function cleanWord(w) {
     : [];
   return { greek: w.greek, russian: w.russian, topic: text(w.topic) || "Разное", note: text(w.note), verbs };
 }
+// Optional fields: review schedule, daily tallies, settings and the learner's own hint.
+// Keep in step with normalizeProgress in index.html.
+const EXTRA_FIELDS = ["due", "ivl", "ease", "reps", "lapses", "seen", "reviews", "fresh", "newPerDay", "goal"];
 function cleanEntry(e) {
   if (!isObject(e)) return null;
   const n = v => (Number.isSafeInteger(v) && v >= 0 ? v : 0);
-  return { correct: n(e.correct), wrong: n(e.wrong), streak: n(e.streak), last: n(e.last), fav: e.fav === true };
+  const clean = { correct: n(e.correct), wrong: n(e.wrong), streak: n(e.streak), last: n(e.last), fav: e.fav === true };
+  for (const field of EXTRA_FIELDS) if (Number.isSafeInteger(e[field]) && e[field] >= 0) clean[field] = e[field];
+  if (typeof e.hint === "string" && e.hint.trim()) clean.hint = e.hint.trim().slice(0, 300);
+  return clean;
 }
 function cleanDoc(doc) {
   const vocab = Array.isArray(doc?.vocab) ? doc.vocab.map(cleanWord).filter(Boolean) : [];

@@ -109,6 +109,37 @@ button{cursor:pointer}
 .example-item+.example-item{padding-top:10px;border-top:1px dashed var(--line)}
 .example-item p{margin:2px 0 0}
 .example-item .ru-line{color:var(--muted)}
+.today-line{font-size:14px;color:var(--muted);line-height:1.5}
+.today-line b{color:var(--accent)}
+.btn.mid{background:#fff8ea;border-color:#f1dfb5;color:#8a5a00}
+.btn small{display:block;font-weight:600;font-size:12px;opacity:.75;margin-top:2px}
+.actions .wide,.actions .full{grid-column:1/-1}
+.actions .span2{grid-column:span 2}
+.actions[hidden],.done-box[hidden],.mnemo-box[hidden],.write-form[hidden],.gap-ru[hidden],[hidden].linkbtn,p[hidden]{display:none}
+.say-result{font-weight:700;font-size:14px;min-height:0}
+.say-result.ok,.ok-text{color:var(--good)}
+.say-result.bad,.bad-text{color:var(--bad)}
+.mnemo-box{background:#fffaf0;border-color:#f1e3c4}
+.mnemo-box .example-title{color:#8a5a00}
+.linkbtn{border:0;background:none;color:var(--accent);font-weight:700;padding:8px 0 0;cursor:pointer;display:block}
+.mnemo-box form{margin-top:8px}
+.mnemo-box textarea{resize:vertical;font:inherit}
+.done-box{text-align:center;margin-top:12px}
+.done-box .sync-actions{justify-content:center}
+.quiz-modes{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:6px}
+.quiz-modes button{padding:9px 4px}
+.write-form{display:grid;grid-template-columns:1fr auto;gap:10px}
+.write-form .input{font-size:18px}
+.gap-ru{color:var(--muted);font-size:17px;margin:-8px 0 16px}
+.quiz-q.sentence{font-size:clamp(22px,4.6vw,32px);font-weight:750;line-height:1.3}
+.gap{display:inline-block;min-width:3em;border-bottom:3px solid var(--accent2);color:transparent}
+.listen-btn{font-size:20px;padding:16px 22px}
+.days{display:flex;gap:5px;margin:12px 0 4px}
+.days i{flex:1;height:22px;border-radius:6px;background:#dfe7df}
+.days i.part{background:#b7dcc4}
+.days i.full{background:var(--accent2)}
+.daily-box label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;font-weight:650;font-size:15px}
+.daily-box select{width:auto}
 .say{border:0;background:none;padding:0 4px 0 0;font-size:15px;cursor:pointer}
 .card-img{font-size:clamp(56px,11vw,88px);line-height:1;margin-top:6px}
 .card-img[hidden]{display:none}
@@ -131,7 +162,8 @@ button{cursor:pointer}
  .section-title{font-size:20px;margin-bottom:6px}
  #study .panel{display:flex;flex-direction:column}
  #study .actions{order:3}
- #study #cardExample{order:4}
+ #study #mnemoBox{order:4}
+ #study #cardExample{order:5}
  .card-wrap{min-height:0;margin-top:4px}
  .flashcard{min-height:300px;padding:20px;border-radius:24px}
  .prompt{margin:18px 0}
@@ -152,8 +184,7 @@ button{cursor:pointer}
  .row{grid-template-columns:1fr auto}
  .row .ru{grid-column:1/2}
  .row-actions{grid-column:2;grid-row:1/3}
- .actions{grid-template-columns:1fr 1fr}
- .actions .wide{grid-column:1/-1}
+ .actions{grid-template-columns:repeat(3,1fr)}
 }
 </style>
 </head>
@@ -183,7 +214,7 @@ button{cursor:pointer}
 <section id="study" class="view active">
   <div class="panel">
     <div class="list-head">
-      <div><h2 class="section-title">Карточки</h2><div class="hint">Сначала показываю слова, где были ошибки.</div></div>
+      <div><h2 class="section-title">Карточки</h2><div class="today-line" id="todayLine"></div></div>
       <div class="toggle" id="studyMode"><button data-mode="review" class="active">Повтор</button><button data-mode="random">Случайно</button></div>
     </div>
     <div class="card-wrap">
@@ -199,11 +230,29 @@ button{cursor:pointer}
         <div class="meta"><span id="cardScore"></span><span id="cardFav"></span></div>
       </button>
     </div>
+    <div class="done-box" id="doneBox" hidden>
+      <p class="hint">Новые слова придут завтра, а выученные вернутся, когда подойдёт срок повтора.</p>
+      <div class="sync-actions"><button class="btn primary" id="moreNewBtn" type="button">Ещё 10 новых слов</button><button class="btn" id="randomBtn" type="button">Повторять вразброс</button></div>
+    </div>
+    <div class="example-box mnemo-box" id="mnemoBox" hidden>
+      <div class="example-title">Моя подсказка</div>
+      <button class="linkbtn" id="mnemoShow" type="button">💡 Показать подсказку</button>
+      <p id="mnemoText"></p>
+      <p class="hint" id="mnemoIdea">Своя ассоциация запоминается лучше готовой: созвучие с русским словом, яркий образ, маленькая история. Например: θάλασσα — «талассотерапия».</p>
+      <button class="linkbtn" id="mnemoEdit" type="button"></button>
+      <form id="mnemoForm" hidden>
+        <textarea class="input" id="mnemoInput" rows="2" maxlength="300" placeholder="Например: σπίτι — «спите» дома"></textarea>
+        <div class="sheet-actions"><button type="button" class="btn" id="mnemoCancel">Отмена</button><button class="btn primary">Сохранить</button></div>
+      </form>
+    </div>
     <div class="example-box" id="cardExample" hidden></div>
-    <div class="actions">
-      <button class="btn bad" id="missBtn">✕ Не знаю</button>
-      <button class="btn good" id="knowBtn">✓ Знаю</button>
-      <button class="btn wide" id="speakBtn">🔊 Произнести по-гречески</button>
+    <div class="actions" id="cardActions">
+      <button class="btn bad" id="againBtn">Забыл<small id="againIvl"></small></button>
+      <button class="btn mid" id="hardBtn">Трудно<small id="hardIvl"></small></button>
+      <button class="btn good" id="easyBtn">Легко<small id="easyIvl"></small></button>
+      <button class="btn wide" id="speakBtn">🔊 Произнести</button>
+      <button class="btn" id="micBtn" hidden>🎤 Вслух</button>
+      <div class="say-result full" id="sayResult" role="status"></div>
     </div>
   </div>
 </section>
@@ -211,11 +260,17 @@ button{cursor:pointer}
 <section id="quiz" class="view">
   <div class="panel">
     <div class="list-head">
-      <div><h2 class="section-title">Тест</h2><div class="hint">4 варианта ответа. Ошибки автоматически попадут в повтор.</div></div>
+      <div><h2 class="section-title">Тест</h2><div class="hint" id="quizHint"></div></div>
       <button class="btn" id="newQuizBtn">Новый вопрос</button>
     </div>
+    <div class="toggle quiz-modes" id="quizMode"><button data-mode="choice" class="active">Варианты</button><button data-mode="write">Написать</button><button data-mode="gap">Пропуск</button><button data-mode="listen">На слух</button></div>
     <div class="quiz-q" id="quizQ"></div>
+    <div class="gap-ru" id="quizSub" hidden></div>
     <div class="options" id="quizOptions"></div>
+    <form class="write-form" id="writeForm" hidden autocomplete="off">
+      <input class="input" id="writeInput" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" enterkeyhint="done" aria-label="Ваш ответ">
+      <button class="btn primary" id="writeBtn">Проверить</button>
+    </form>
     <div class="feedback" id="quizFeedback"></div><div class="example-box" id="quizExample" hidden></div>
   </div>
 </section>
@@ -242,6 +297,14 @@ button{cursor:pointer}
     <div style="margin-top:22px">
       <div class="meta"><span>Доля известных карточек</span><span id="progressText"></span></div>
       <div class="progress"><i id="progressBar"></i></div>
+    </div>
+    <div class="sync-box daily-box">
+      <h3>Каждый день</h3>
+      <div class="sync-status" id="streakLine"></div>
+      <div class="days" id="dayDots" aria-hidden="true"></div>
+      <p class="note">Последние 14 дней: зелёный — цель выполнена, светлый — занимались, но меньше цели.</p>
+      <label>Новых слов в день<select class="control" id="newPerDay"><option>5</option><option>10</option><option>15</option><option>20</option><option>30</option></select></label>
+      <label>Цель: ответов в день<select class="control" id="dailyGoal"><option>10</option><option>20</option><option>30</option><option>50</option><option>100</option></select></label>
     </div>
     <div class="sync-box">
       <h3>Синхронизация между устройствами</h3>
@@ -277,6 +340,7 @@ button{cursor:pointer}
       <div><div class="label">Перевод</div><input class="input" id="editRussian"></div>
       <div><div class="label">Тема</div><input class="input" id="editTopic"></div>
       <div><div class="label">Заметка</div><input class="input" id="editNote"></div>
+      <div><div class="label">Моя подсказка (ассоциация)</div><textarea class="input" id="editHint" rows="2" maxlength="300"></textarea></div>
       <details class="verb-editor" id="editVerbs">
         <summary>Формы глагола</summary>
         <div id="editVerbRows"></div>
@@ -1301,15 +1365,21 @@ function normalizeVocab(words, version, savedVerbEdits){
     return {greek, russian, topic:topic||"Разное", note:typeof note==="string"?note:"", verbs};
   });
 }
+// Optional per-entry fields: the review schedule, daily tallies (day|date|device), settings
+// (cfg|daily) and the learner's own hint. Keep in step with functions/api/state.js.
+const EXTRA_FIELDS = ["due","ivl","ease","reps","lapses","seen","reviews","fresh","newPerDay","goal"];
 function normalizeProgress(entries){
   if(!entries || typeof entries!=="object" || Array.isArray(entries)) return {};
   const count = value => Number.isSafeInteger(value) && value>=0 ? value : 0;
   return Object.fromEntries(Object.entries(entries).filter(([key, entry]) =>
     key.includes("|") && entry && typeof entry==="object" && !Array.isArray(entry)
-  ).map(([key, entry]) => [key, {
-    correct:count(entry.correct), wrong:count(entry.wrong), streak:count(entry.streak),
-    last:count(entry.last), fav:entry.fav===true
-  }]));
+  ).map(([key, entry]) => {
+    const clean={correct:count(entry.correct), wrong:count(entry.wrong), streak:count(entry.streak),
+      last:count(entry.last), fav:entry.fav===true};
+    for(const field of EXTRA_FIELDS) if(Number.isSafeInteger(entry[field]) && entry[field]>=0) clean[field]=entry[field];
+    if(typeof entry.hint==="string" && entry.hint.trim()) clean.hint=entry.hint.trim().slice(0,300);
+    return [key, clean];
+  }));
 }
 function loadState(raw){
   const saved = parseStored(raw);
@@ -1422,14 +1492,6 @@ function applyFilter(){
   renderCard(); renderList(); renderStats(); newQuiz();
   $("#countPill").textContent=`${vocab.length} слов`;
 }
-function sortForReview(arr){
-  return [...arr].sort((a,b)=>{
-    const pa=pFor(a), pb=pFor(b);
-    const sa=pa.wrong*4-pa.correct-pa.streak*1.5-(pa.last||0)/1e13;
-    const sb=pb.wrong*4-pb.correct-pb.streak*1.5-(pb.last||0)/1e13;
-    return sb-sa;
-  });
-}
 function practiceCards(words){
   const tense=$("#tense").value;
   if(!tense) return withExamples(words);
@@ -1484,15 +1546,295 @@ document.addEventListener("click",e=>{
   const btn=e.target.closest("[data-say]");
   if(btn){ e.stopPropagation(); say(btn.dataset.say); }
 },true);
+// ---- Spaced repetition, daily plan and streak ----
+// Each card has its own next review date. "Забыл" brings it back in 10 minutes, "Трудно" grows the
+// interval slowly, "Легко" multiplies it, so known words come back rarely and weak ones often.
+const DAY_MS = 864e5;
+let extraNew = 0;
+let queueInfo = {due:0, news:0, freshTotal:0};
+function localDate(d=new Date()){
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function endOfToday(){
+  const d=new Date(); d.setHours(23,59,59,999); return d.getTime();
+}
+function plural(n,one,few,many){
+  const m10=n%10, m100=n%100;
+  return m10===1 && m100!==11 ? one : m10>=2 && m10<=4 && (m100<12 || m100>14) ? few : many;
+}
+function settings(){
+  const c=progress["cfg|daily"]||{};
+  return {newPerDay:c.newPerDay||10, goal:c.goal||20};
+}
+// The schedule of a card, or null for a card never studied. Cards studied before schedules existed
+// get one from their streak: the longer the streak, the later the next review.
+function srsOf(p){
+  if(p.due>0) return {due:p.due, ivl:p.ivl||0, ease:p.ease||250, reps:p.reps||0, lapses:p.lapses||0};
+  if(p.last>0 || p.correct || p.wrong){
+    const ivl=p.streak>0 ? Math.min(2**(p.streak-1),30) : 0;
+    return {due:(p.last||0)+ivl*DAY_MS, ivl, ease:250, reps:p.streak, lapses:0};
+  }
+  return null;
+}
+function nextSchedule(p, grade, now=Date.now(), keepEase=false){
+  let {ivl, ease, reps, lapses}=srsOf(p) ?? {ivl:0, ease:250, reps:0, lapses:0};
+  if(grade==="again"){
+    return {due:now+10*60e3, ivl:0, ease:keepEase ? ease : Math.max(130,ease-20), reps:0, lapses:lapses+(reps>0?1:0)};
+  }
+  if(grade==="hard") ivl = reps===0 ? 1 : Math.max(ivl+1, Math.round(ivl*1.2));
+  else ivl = reps===0 ? (lapses ? 2 : 3) : reps===1 ? Math.max(ivl+1, 6) : Math.max(ivl+1, Math.round(ivl*ease/100));
+  if(!keepEase) ease = grade==="hard" ? Math.max(130,ease-15) : Math.min(300,ease+5);
+  ivl=Math.min(ivl,365);
+  return {due:now+ivl*DAY_MS, ivl, ease, reps:reps+1, lapses};
+}
+function ivlLabel(s){
+  if(!s.ivl) return "10 мин";
+  if(s.ivl<30) return s.ivl+" дн";
+  if(s.ivl<365) return Math.round(s.ivl/30)+" мес";
+  return "год";
+}
+// Answers per day are counted per device (day|date|device), so two devices never overwrite each other.
+function dayDevice(){
+  try { return syncDevice(); } catch { return "local"; }
+}
+function dayTotals(date){
+  const totals={reviews:0, fresh:0}, prefix="day|"+date+"|";
+  for(const [key,entry] of Object.entries(progress)){
+    if(key.startsWith(prefix)){ totals.reviews+=entry.reviews||0; totals.fresh+=entry.fresh||0; }
+  }
+  return totals;
+}
+function withDayCount(nextProgress, fresh){
+  const key="day|"+localDate()+"|"+dayDevice();
+  const entry=nextProgress[key]||{correct:0,wrong:0,streak:0,last:0,fav:false};
+  return {...nextProgress, [key]:{...entry, reviews:(entry.reviews||0)+1, fresh:(entry.fresh||0)+(fresh?1:0), last:Date.now()}};
+}
+function streakDays(){
+  const goal=settings().goal, day=new Date();
+  let days=dayTotals(localDate(day)).reviews>=goal ? 1 : 0;
+  for(;;){
+    day.setDate(day.getDate()-1);
+    if(dayTotals(localDate(day)).reviews>=goal) days++; else break;
+  }
+  return days;
+}
+// One answer: counters, schedule and the day's tally. "card" is a flashcard, "recall" is typing the
+// word, "recognize" is picking or hearing it. Tests move only cards that are due (or reset a
+// forgotten one); new words enter through the cards, within the daily limit.
+function answer(w, grade, mode){
+  const key=idOf(w), p={...pFor(w)}, now=Date.now();
+  const s=srsOf(p), isNew=!s;
+  if(grade==="again"){ p.wrong++; p.streak=0; } else { p.correct++; p.streak++; }
+  p.last=now;
+  if(mode==="card" || (s && (grade==="again" || s.due<=now))){
+    Object.assign(p, nextSchedule(p, grade, now, mode==="recognize"));
+    if(isNew) p.seen=now;
+  }
+  return saveState(vocab, withDayCount({...progress, [key]:p}, isNew && mode==="card"));
+}
+function buildQueue(cards){
+  const now=Date.now(), eod=endOfToday(), dueNow=[], later=[], fresh=[];
+  for(const card of cards){
+    const s=srsOf(pFor(card));
+    if(!s) fresh.push(card);
+    else if(s.due<=now) dueNow.push([s.due,card]);
+    else if(s.due<=eod) later.push([s.due,card]);
+  }
+  dueNow.sort((a,b)=>a[0]-b[0]);
+  later.sort((a,b)=>a[0]-b[0]);
+  const newLeft=Math.max(0, settings().newPerDay+extraNew-dayTotals(localDate()).fresh);
+  const news=fresh.slice(0,newLeft), reviews=dueNow.map(x=>x[1]), queue=[];
+  const newCount=news.length;
+  // One new word after every three reviews keeps a session varied.
+  while(reviews.length || news.length){
+    queue.push(...reviews.splice(0,3));
+    if(news.length) queue.push(news.shift());
+  }
+  queue.push(...later.map(x=>x[1]));
+  return {queue, due:dueNow.length+later.length, news:newCount, freshTotal:fresh.length};
+}
+function renderToday(){
+  const {goal}=settings(), today=dayTotals(localDate()).reviews, streak=streakDays();
+  const parts=studyMode==="review" ? [`к повтору <b>${queueInfo.due}</b>`, `новых <b>${queueInfo.news}</b>`] : ["вразброс, без плана"];
+  parts.push(`сегодня <b>${today}</b>/${goal}`);
+  if(streak) parts.push(`🔥 ${streak} ${plural(streak,"день","дня","дней")}`);
+  $("#todayLine").innerHTML=parts.join(" · ");
+}
+function renderDaily(){
+  const {newPerDay, goal}=settings(), streak=streakDays(), today=dayTotals(localDate()).reviews;
+  $("#newPerDay").value=String(newPerDay);
+  $("#dailyGoal").value=String(goal);
+  $("#streakLine").textContent=(streak ? `🔥 ${streak} ${plural(streak,"день","дня","дней")} подряд` :
+    "Серия начнётся, когда выполните цель дня")+` · сегодня ${today} из ${goal}`;
+  const day=new Date(), dots=[];
+  day.setDate(day.getDate()-13);
+  for(let i=0;i<14;i++){
+    const date=localDate(day), n=dayTotals(date).reviews;
+    dots.push(`<i class="${n>=goal?"full":n?"part":""}" title="${date}: ${n}"></i>`);
+    day.setDate(day.getDate()+1);
+  }
+  $("#dayDots").innerHTML=dots.join("");
+}
+function saveSettings(change){
+  const current=progress["cfg|daily"]||{correct:0,wrong:0,streak:0,last:0,fav:false};
+  const next={...current, ...settings(), ...change, last:Date.now()};
+  if(saveState(vocab, {...progress, "cfg|daily":next})){ refreshStudyPool(); renderCard(); renderStats(); }
+}
+$("#newPerDay").onchange=e=>saveSettings({newPerDay:+e.target.value});
+$("#dailyGoal").onchange=e=>saveSettings({goal:+e.target.value});
+
+// ---- Comparing answers ----
+function looseKey(s){
+  return searchKey(String(s)).replace(/ё/g,"е").replace(/[^\p{L}\p{N}]+/gu,"");
+}
+function exactKey(s){
+  return String(s).toLowerCase().normalize("NFC").replace(/ё/g,"е").replace(/[^\p{L}\p{M}\p{N}]+/gu,"");
+}
+// Every acceptable spelling of an answer: each variant split on / , ; ·, with and without an article.
+function answerForms(text){
+  const forms=new Set([String(text).trim()]);
+  for(const part of String(text).split(/[\/,;·]|\s[-–—]\s/)){
+    const t=part.replace(/\([^)]*\)/g,"").trim();
+    if(looseKey(t).length<2) continue;
+    forms.add(t);
+    const bare=t.replace(/^(ο|η|το|οι|τα|τον|την|του|της|των)\s+/i,"").trim();
+    if(looseKey(bare).length>=2) forms.add(bare);
+  }
+  return [...forms];
+}
+function editDistance(a,b){
+  const row=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){
+    let prev=row[0]; row[0]=i;
+    for(let j=1;j<=b.length;j++){
+      const tmp=row[j];
+      row[j]=Math.min(row[j]+1, row[j-1]+1, prev+(a[i-1]===b[j-1]?0:1));
+      prev=tmp;
+    }
+  }
+  return row[b.length];
+}
+function checkWritten(value, target){
+  if(!looseKey(value)) return null;
+  const forms=answerForms(target);
+  if(forms.some(f=>exactKey(f)===exactKey(value))) return "exact";
+  if(forms.some(f=>looseKey(f)===looseKey(value))) return "accent";
+  if(forms.some(f=>looseKey(f).length>=5 && editDistance(looseKey(f),looseKey(value))<=1)) return "near";
+  return "wrong";
+}
+function sayText(w){
+  return w.greek.replace(/[·;/].*$/,"");
+}
+
+// ---- A word in its sentence ----
+const gapCache=new Map();
+function gapFor(w){
+  const cacheKey=idOf(w)+"|"+w.greek;
+  if(gapCache.has(cacheKey)) return gapCache.get(cacheKey);
+  const stems=answerForms(w.greek).filter(f=>!/\s/.test(f.trim())).map(looseKey).filter(k=>k.length>=3)
+    .map(k=>({k, cut:k.length>5 ? k.slice(0,-2) : k.length>=5 ? k.slice(0,-1) : k}));
+  let found=null;
+  for(const [gr,ru] of examplesFor(w)){
+    for(const m of gr.matchAll(/[\p{L}\p{M}]+/gu)){
+      const t=looseKey(m[0]);
+      const hit=stems.some(({k,cut})=>k.length<5 ? t===k : t.startsWith(cut) && t.length<=k.length+4);
+      if(hit){ found={before:gr.slice(0,m.index), token:m[0], after:gr.slice(m.index+m[0].length), ru}; break; }
+    }
+    if(found) break;
+  }
+  gapCache.set(cacheKey, found);
+  return found;
+}
+
+// ---- Own memory hints ----
+let shownCardId=null, hintShown=false, hintEditing=false;
+function renderMnemo(w){
+  const box=$("#mnemoBox"), hint=w ? (pFor(w).hint||"") : "";
+  box.hidden=!w || (!revealed && !hint);
+  if(box.hidden) return;
+  $("#mnemoText").textContent=hint;
+  $("#mnemoText").hidden=!hint || (!revealed && !hintShown) || hintEditing;
+  $("#mnemoShow").hidden=!hint || revealed || hintShown;
+  $("#mnemoIdea").hidden=!!hint || hintEditing;
+  $("#mnemoEdit").hidden=!revealed || hintEditing;
+  $("#mnemoEdit").textContent=hint ? "✎ Изменить подсказку" : "+ Придумать свою подсказку";
+  $("#mnemoForm").hidden=!hintEditing;
+}
+$("#mnemoShow").onclick=()=>{ hintShown=true; renderMnemo(currentCard()); };
+$("#mnemoEdit").onclick=()=>{
+  const w=currentCard(); if(!w) return;
+  hintEditing=true; renderMnemo(w);
+  const input=$("#mnemoInput");
+  input.value=pFor(w).hint||"";
+  input.focus();
+};
+$("#mnemoCancel").onclick=()=>{ hintEditing=false; renderMnemo(currentCard()); };
+$("#mnemoForm").onsubmit=e=>{
+  e.preventDefault();
+  const w=currentCard(); if(!w) return;
+  const key=idOf(w), entry={...pFor(w)}, hint=$("#mnemoInput").value.trim().slice(0,300);
+  if(hint) entry.hint=hint; else delete entry.hint;
+  if(saveState(vocab, {...progress, [key]:entry})){ hintEditing=false; renderMnemo(w); renderList(); }
+};
+
+// ---- Saying the word aloud ----
+const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+let recognizer=null;
+$("#micBtn").hidden=!Recognition;
+$("#speakBtn").classList.toggle("span2", !!Recognition);
+$("#speakBtn").classList.toggle("wide", !Recognition);
+$("#micBtn").onclick=()=>{
+  const w=currentCard(); if(!w || !Recognition) return;
+  if(recognizer){ recognizer.abort(); return; }
+  const out=$("#sayResult"), r=new Recognition();
+  recognizer=r;
+  r.lang="el-GR"; r.maxAlternatives=5; r.interimResults=false;
+  out.className="say-result full";
+  out.textContent="🎤 Слушаю… произнесите слово по-гречески";
+  $("#micBtn").textContent="⏹ Стоп";
+  r.onresult=e=>{
+    const heard=[...e.results[0]].map(a=>a.transcript);
+    const targets=answerForms(w.greek).map(looseKey).filter(Boolean);
+    const ok=heard.some(h=>targets.some(t=>looseKey(h).includes(t)));
+    out.textContent=ok ? "✓ Отлично, похоже!" : `Услышал: «${heard[0]||"…"}». Послушайте 🔊 и попробуйте ещё.`;
+    out.classList.toggle("ok", ok);
+    out.classList.toggle("bad", !ok);
+  };
+  r.onerror=e=>{
+    out.textContent=e.error==="not-allowed" || e.error==="service-not-allowed" ?
+      "Нет доступа к микрофону — разрешите его в настройках браузера." :
+      e.error==="no-speech" ? "Ничего не услышал. Попробуйте ещё раз." : e.error==="aborted" ? "" : "Распознавание речи сейчас недоступно.";
+  };
+  r.onend=()=>{ recognizer=null; $("#micBtn").textContent="🎤 Вслух"; };
+  try { r.start(); } catch { recognizer=null; $("#micBtn").textContent="🎤 Вслух"; }
+};
+
 function refreshStudyPool(){
   const cards=practiceCards(filtered);
-  studyPool=studyMode==="random"?shuffle(cards):sortForReview(cards);
+  if(studyMode==="random") studyPool=shuffle(cards);
+  else {
+    queueInfo=buildQueue(cards);
+    studyPool=queueInfo.queue;
+    cardIndex=0;
+  }
+  renderToday();
 }
 function currentCard(){
   return studyPool[cardIndex] ?? null;
 }
 function renderCard(){
   const w=currentCard();
+  const id=w ? idOf(w) : null;
+  if(id!==shownCardId){
+    shownCardId=id; hintShown=false; hintEditing=false;
+    if(recognizer) recognizer.abort();
+    $("#sayResult").textContent="";
+  }
+  const done=!w && studyMode==="review" && practiceCards(filtered).length>0;
+  $("#doneBox").hidden=!done;
+  $("#moreNewBtn").hidden=!queueInfo.freshTotal;
+  $("#cardActions").hidden=!w;
+  renderMnemo(w);
   showExample($("#cardExample"),w,revealed);
   const img=infoFor(w)?.img;
   $("#cardImg").hidden=!(revealed && img);
@@ -1501,10 +1843,10 @@ function renderCard(){
   forms.hidden=!(revealed && w?.verbs.length);
   forms.innerHTML=forms.hidden ? "" : verbMarkup(w.verbs);
   if(!w){
-    $("#cardPrompt").textContent="Ничего не найдено";
+    $("#cardPrompt").textContent=done ? "На сегодня всё 🎉" : "Ничего не найдено";
     $("#cardAnswer").hidden=true;
     $("#cardHint").hidden=false;
-    $("#cardHint").textContent="Измените фильтр или поиск";
+    $("#cardHint").textContent=done ? "Повторы и новые слова на сегодня пройдены" : "Измените фильтр или поиск";
     $("#cardTopic").textContent="";
     $("#cardProgress").textContent="";
     $("#cardScore").textContent="";
@@ -1518,35 +1860,36 @@ function renderCard(){
   $("#cardHint").hidden=revealed;
   $("#cardHint").textContent="Нажмите на карточку, чтобы открыть ответ";
   $("#cardTopic").textContent=w.topic.replaceAll(" / "," · ");
-  $("#cardProgress").textContent=`${cardIndex+1} / ${studyPool.length||1}`;
-  const p=pFor(w);
-  $("#cardScore").textContent=`✓ ${p.correct} · ✕ ${p.wrong} · серия ${p.streak}`;
+  $("#cardProgress").textContent=studyMode==="review" ? `осталось ${studyPool.length}` : `${cardIndex+1} / ${studyPool.length||1}`;
+  const p=pFor(w), s=srsOf(p);
+  $("#cardScore").textContent=s ? `✓ ${p.correct} · ✕ ${p.wrong} · интервал ${ivlLabel(s)}` : "🆕 новое слово";
+  for(const grade of ["again","hard","easy"]) $("#"+grade+"Ivl").textContent=ivlLabel(nextSchedule(p,grade));
   $("#cardFav").textContent=p.fav?"★ избранное":"☆";
 }
 function nextCard(){
   revealed=false;
-  cardIndex++;
-  if(cardIndex>=studyPool.length){
-    cardIndex=0;
-    refreshStudyPool();
+  if(studyMode==="review") refreshStudyPool();
+  else {
+    cardIndex++;
+    if(cardIndex>=studyPool.length){
+      cardIndex=0;
+      refreshStudyPool();
+    }
   }
   renderCard();
 }
-function rate(ok){
+function rate(grade){
   const w=currentCard(); if(!w) return;
-  const k=idOf(w), p={...pFor(w)};
-  if(ok){p.correct++; p.streak++;} else {p.wrong++; p.streak=0;}
-  p.last=Date.now();
-  if(saveState(vocab, {...progress, [k]:p})){nextCard(); renderStats();}
+  if(answer(w, grade, "card")){ nextCard(); renderStats(); }
 }
 $("#flashcard").onclick=()=>{revealed=!revealed;renderCard()};
-$("#knowBtn").onclick=()=>rate(true);
-$("#missBtn").onclick=()=>rate(false);
+$("#againBtn").onclick=()=>rate("again");
+$("#hardBtn").onclick=()=>rate("hard");
+$("#easyBtn").onclick=()=>rate("easy");
+$("#moreNewBtn").onclick=()=>{ extraNew+=10; refreshStudyPool(); renderCard(); };
+$("#randomBtn").onclick=()=>$('#studyMode button[data-mode="random"]').click();
 $("#speakBtn").onclick=()=>{
-  const w=currentCard(); if(!w || !("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(w.greek.replace(/[·;/].*$/,""));
-  u.lang="el-GR"; u.rate=.85; speechSynthesis.speak(u);
+  const w=currentCard(); if(w) say(sayText(w));
 };
 $("#direction").onchange=()=>{revealed=false;renderCard();newQuiz()};
 $("#tense").onchange=()=>{cardIndex=0;revealed=false;applyFilter();};
@@ -1569,43 +1912,131 @@ function shuffle(items){
   }
   return result;
 }
+let quizMode = "choice";
+let quizCurrent = null;
+const QUIZ_HINTS = {
+  choice:"4 варианта ответа. Ошибки попадут в повтор.",
+  write:"Напишите ответ сами — так слово запоминается лучше всего. Ударение не обязательно, но я подскажу.",
+  gap:"Вставьте слово в живую фразу.",
+  listen:"Послушайте слово и выберите перевод."
+};
+// Tests ask mostly about words already studied, preferring ones that are due.
+function pickQuizCard(pool){
+  const now=Date.now();
+  const seen=pool.filter(w=>srsOf(pFor(w)));
+  const due=seen.filter(w=>srsOf(pFor(w)).due<=now);
+  const from=due.length && Math.random()<.7 ? due : seen.length ? seen : pool;
+  return from[Math.floor(Math.random()*from.length)];
+}
+const quizDone = () => $("#quizOptions").dataset.done==="1";
+function distractors(values, correct, count=3){
+  const seen=new Set([looseKey(correct)]), out=[];
+  for(const v of shuffle(values)){
+    const k=looseKey(v);
+    if(!seen.has(k)){ seen.add(k); out.push(v); }
+    if(out.length>=count) break;
+  }
+  return out;
+}
 function newQuiz(){
   clearTimeout(quizTimer);
-  const pool=practiceCards(filtered);
   showExample($("#quizExample"),null,false);
-  const box=$("#quizOptions");
-  box.innerHTML=""; $("#quizFeedback").textContent="";
+  const box=$("#quizOptions"), form=$("#writeForm"), sub=$("#quizSub"), input=$("#writeInput");
+  box.innerHTML=""; box.dataset.done="0";
+  $("#quizFeedback").textContent=""; $("#quizFeedback").className="feedback";
+  form.hidden=true; sub.hidden=true;
+  input.value=""; input.readOnly=false; $("#writeBtn").textContent="Проверить";
+  $("#quizHint").textContent=QUIZ_HINTS[quizMode];
+  $("#quizQ").classList.toggle("sentence", quizMode==="gap");
+  let pool=practiceCards(filtered);
+  if(quizMode==="gap") pool=pool.filter(w=>gapFor(w));
+  quizCurrent=null;
   if(pool.length<2){
-    $("#quizQ").textContent="Для теста нужны хотя бы два слова.";
+    $("#quizQ").textContent=quizMode==="gap" ? "Для этих слов пока нет фраз с пропуском." : "Для теста нужны хотя бы два слова.";
     return;
   }
-  const w=pool[Math.floor(Math.random()*pool.length)], dir=$("#direction").value;
-  $("#quizQ").textContent=dir==="gr-ru"?w.greek:w.russian;
-  const correct=dir==="gr-ru"?w.russian:w.greek;
-  const answers=new Set(pool.map(x=>dir==="gr-ru"?x.russian:x.greek));
-  answers.delete(correct);
-  const distract=shuffle(answers).slice(0,3);
-  const opts=shuffle([correct,...distract]);
-  opts.forEach(txt=>{
-    const b=document.createElement("button"); b.className="option"; b.textContent=txt;
+  const w=pickQuizCard(pool), dir=$("#direction").value;
+  quizCurrent=w;
+  if(quizMode==="write"){
+    $("#quizQ").textContent=dir==="gr-ru" ? w.greek : w.russian;
+    input.lang=dir==="gr-ru" ? "ru" : "el";
+    input.placeholder=dir==="gr-ru" ? "Перевод по-русски" : "Напишите по-гречески";
+    form.hidden=false;
+    return;
+  }
+  if(quizMode==="gap"){
+    const g=gapFor(w);
+    $("#quizQ").innerHTML=`<span lang="el">${esc(g.before)}<span class="gap">_____</span>${esc(g.after)}</span>`;
+    sub.textContent=g.ru; sub.hidden=false;
+    // Match the case of the missing word, so a capital letter does not give the answer away.
+    const capital=g.token[0]!==g.token[0].toLocaleLowerCase("el");
+    const cased=t=>capital ? t[0].toLocaleUpperCase("el")+t.slice(1) : t[0].toLocaleLowerCase("el")+t.slice(1);
+    const others=distractors(pool.filter(x=>x!==w).map(x=>cased(gapFor(x).token)), g.token);
+    renderOptions(shuffle([g.token,...others]), g.token, w, g.before+g.token+g.after);
+    return;
+  }
+  if(quizMode==="listen"){
+    $("#quizQ").innerHTML='<button class="btn listen-btn" id="listenAgain" type="button">🔊 Слушать ещё раз</button>';
+    $("#listenAgain").onclick=()=>say(sayText(w));
+    say(sayText(w));
+    const others=distractors(pool.filter(x=>x!==w).map(x=>x.russian), w.russian);
+    renderOptions(shuffle([w.russian,...others]), w.russian, w, w.greek+" — "+w.russian);
+    return;
+  }
+  $("#quizQ").textContent=dir==="gr-ru" ? w.greek : w.russian;
+  const correct=dir==="gr-ru" ? w.russian : w.greek;
+  const others=distractors(pool.filter(x=>x!==w).map(x=>dir==="gr-ru" ? x.russian : x.greek), correct);
+  renderOptions(shuffle([correct,...others]), correct, w, correct);
+}
+function renderOptions(options, correct, w, reveal){
+  const box=$("#quizOptions");
+  for(const text of options){
+    const b=document.createElement("button");
+    b.className="option"; b.textContent=text;
+    if(quizMode==="gap") b.lang="el";
     b.onclick=()=>{
-      if(box.dataset.done==="1") return;
-      const ok=txt===correct, k=idOf(w), p={...pFor(w)};
-      if(ok){p.correct++;p.streak++;}
-      else{p.wrong++;p.streak=0;}
-      p.last=Date.now();
-      if(!saveState(vocab, {...progress, [k]:p})) return;
+      if(quizDone()) return;
+      const ok=text===correct;
+      if(!answer(w, ok ? "hard" : "again", "recognize")) return;
       box.dataset.done="1";
-      [...box.children].forEach(x=>{ if(x.textContent===correct)x.classList.add("correct"); });
-      if(!ok)b.classList.add("wrong");
-      $("#quizFeedback").textContent=ok?"Верно ✓":`Правильный ответ: ${correct}`;
+      [...box.children].forEach(x=>{ if(x.textContent===correct) x.classList.add("correct"); });
+      if(!ok) b.classList.add("wrong");
+      $("#quizFeedback").textContent=ok ? "Верно ✓"+(quizMode==="choice" ? "" : " · "+reveal) : "Правильный ответ: "+reveal;
+      if(quizMode==="gap") say(reveal);
       renderStats();
       showExample($("#quizExample"),w,true);
     };
     box.appendChild(b);
-  });
-  box.dataset.done="0";
+  }
 }
+$("#writeForm").onsubmit=e=>{
+  e.preventDefault();
+  if(quizDone()){ newQuiz(); $("#writeInput").focus(); return; }
+  const w=quizCurrent; if(!w) return;
+  const dir=$("#direction").value, target=dir==="gr-ru" ? w.russian : w.greek;
+  const result=checkWritten($("#writeInput").value, target);
+  if(!result) return;
+  const grade=result==="exact" ? "easy" : result==="accent" ? "hard" : "again";
+  if(!answer(w, grade, "recall")) return;
+  $("#quizOptions").dataset.done="1";
+  $("#writeInput").readOnly=true;
+  $("#writeBtn").textContent="Дальше →";
+  const feedback=$("#quizFeedback");
+  feedback.className="feedback "+(grade==="again" ? "bad-text" : "ok-text");
+  feedback.textContent=result==="exact" ? "Верно ✓" :
+    result==="accent" ? "Верно, но проверьте ударение: "+target :
+    result==="near" ? "Почти! Правильно: "+target : "Правильный ответ: "+target;
+  if(dir==="ru-gr") say(sayText(w));
+  renderStats();
+  showExample($("#quizExample"),w,true);
+};
+$("#quizMode").onclick=e=>{
+  const b=e.target.closest("button[data-mode]"); if(!b) return;
+  quizMode=b.dataset.mode;
+  $$("#quizMode button").forEach(x=>x.classList.toggle("active",x===b));
+  newQuiz();
+  if(quizMode==="write") $("#writeInput").focus();
+};
 $("#newQuizBtn").onclick=newQuiz;
 
 function renderList(){
@@ -1620,7 +2051,7 @@ function renderList(){
     const idx=vocab.indexOf(w), p=pFor(w);
     return `<div class="row">
       <div><div class="gr" lang="el">${infoFor(w)?.img?`<span class="img" aria-hidden="true">${esc(infoFor(w).img)}</span>`:""}${esc(w.greek)}</div><small>${esc(w.topic.replaceAll(" / "," · "))}</small></div>
-      <div class="ru">${esc(w.russian)}${w.note?`<small>${esc(w.note)}</small>`:""}${verbMarkup(w.verbs)}${examplesFor(w).length?`<details><summary>Примеры</summary>${exampleMarkup(examplesFor(w))}</details>`:""}</div>
+      <div class="ru">${esc(w.russian)}${w.note?`<small>${esc(w.note)}</small>`:""}${p.hint?`<small>💡 ${esc(p.hint)}</small>`:""}${verbMarkup(w.verbs)}${examplesFor(w).length?`<details><summary>Примеры</summary>${exampleMarkup(examplesFor(w))}</details>`:""}</div>
       <div class="row-actions">
         <button class="iconbtn" data-speak="${idx}" title="Произнести">🔊</button>
         <button class="iconbtn" data-fav="${idx}" title="Избранное">${p.fav?"★":"☆"}</button>
@@ -1645,6 +2076,7 @@ function openEdit(idx){
   const w=idx===null?{greek:"",russian:"",topic:"Разное",note:"",verbs:[]}:vocab[idx];
   $("#modalTitle").textContent=idx===null?"Добавить слово":"Редактировать слово";
   $("#editGreek").value=w.greek;$("#editRussian").value=w.russian;$("#editTopic").value=w.topic;$("#editNote").value=w.note||"";
+  $("#editHint").value=idx===null ? "" : (pFor(w).hint||"");
   $("#editVerbRows").replaceChildren();
   $("#editVerbs").open=Boolean(w.verbs.length);
   w.verbs.forEach(addVerbRow);
@@ -1686,6 +2118,13 @@ $("#saveEdit").onclick=()=>{
     nextProgress[id]=progress[previousId];
     if(!words.some(word=>idOf(word)===previousId)) delete nextProgress[previousId];
   }
+  const hint=$("#editHint").value.trim().slice(0,300);
+  const entry=nextProgress[id] || {correct:0,wrong:0,streak:0,last:0,fav:false};
+  if(hint || entry.hint){
+    const next={...entry};
+    if(hint) next.hint=hint; else delete next.hint;
+    nextProgress[id]=next;
+  }
   if(saveState(words, nextProgress)){
     $("#editModal").classList.remove("open");initFilters();applyFilter();
   }
@@ -1705,6 +2144,8 @@ function renderStats(){
   const formatted=pct.toLocaleString("ru",{maximumFractionDigits:1});
   $("#progressText").textContent=`${known} из ${counted.length} · ${formatted}%`;
   $("#progressBar").style.width=pct+"%";
+  renderDaily();
+  renderToday();
 }
 $("#exportBtn").onclick=()=>{
   const backup={vocab,progress,catalogVersion:CATALOG_VERSION,exportedAt:new Date().toISOString()};
@@ -1741,8 +2182,16 @@ $("#importInput").onchange=async e=>{
   }
 };
 $("#resetBtn").onclick=()=>{
-  if(confirm("Сбросить весь прогресс? Слова и ваши правки останутся.") && saveState(vocab, {})){
-    renderStats();renderCard();renderList();
+  if(!confirm("Сбросить весь прогресс? Слова, ваши правки, подсказки и избранное останутся.")) return;
+  const kept={};
+  for(const [key,entry] of Object.entries(progress)){
+    if(key==="cfg|daily") kept[key]=entry;
+    else if(!key.startsWith("day|") && (entry.hint || entry.fav)){
+      kept[key]={correct:0,wrong:0,streak:0,last:0,fav:entry.fav, ...(entry.hint ? {hint:entry.hint} : {})};
+    }
+  }
+  if(saveState(vocab, kept)){
+    refreshStudyPool();renderStats();renderCard();renderList();
   }
 };
 function updateFiltersBtn(){
