@@ -115,7 +115,10 @@ export function mergeDocs(stored, incoming, now, legacy = false) {
     let entry;
     if (it > st) {
       entry = own(incoming.progress, key);
-      if (entry && legacy) entry = adaptLegacy(entry, own(stored.progress, key), now);
+      const before = own(stored.progress, key);
+      if (entry && legacy) entry = adaptLegacy(entry, before, now);
+      // An older version's reset or import removes entries; like the current reset, keep the hint.
+      else if (!entry && legacy && before?.hint) entry = { correct: 0, wrong: 0, streak: 0, last: 0, fav: false, hint: before.hint };
     }
     else if (st > it) entry = own(stored.progress, key);
     else entry = own(stored.progress, key) ?? (Object.hasOwn(stored.mtime, key) ? undefined : own(incoming.progress, key));
