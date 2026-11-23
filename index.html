@@ -2173,7 +2173,7 @@ function newQuiz(){
   if(quizMode==="gap") pool=pool.filter(w=>gapFor(w));
   if(quizMode==="gender") pool=pool.filter(w=>genderOf(w));
   quizCurrent=null;
-  if(pool.length<2){
+  if(pool.length<(quizMode==="gender" ? 1 : 2)){
     $("#quizQ").textContent=quizMode==="gap" ? "Для этих слов пока нет фраз с пропуском." :
       quizMode==="gender" ? "Среди этих слов нет существительных с известным родом." : "Для теста нужны хотя бы два слова.";
     return;
