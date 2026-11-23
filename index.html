@@ -2310,18 +2310,32 @@ async function importLegacyGist(){
   // The gist predates schedules and hints: fold its newer entries into this browser's state the
   // way an older tab's answers are folded in; the regular sync then uploads them.
   if(doc){
-    const meta=syncMeta(), nextProgress={...progress};
+    // Only what is newer in the gist than both here and on the server is taken, and it keeps the
+    // gist's own change time, so the server's newer-wins merge still decides fairly.
+    const server=(await syncRequest("GET")).doc||{};
+    const sTimes=timeMap(server.mtime), sWords=timeMap(server.vtime);
+    const meta=syncMeta(), nextProgress={...progress}, takenKeys={}, takenWords={};
     for(const [key,entry] of Object.entries(doc.progress)){
-      if((doc.mtime[key]||entry.last||0) <= (meta.mtime[key]||0)) continue;
+      const t=doc.mtime[key]||entry.last||0;
+      if(t <= Math.max(meta.mtime[key]||0, sTimes[key]||0)) continue;
       nextProgress[key]=adoptLegacyEntry(entry, nextProgress[key]);
+      takenKeys[key]=t;
     }
     // Word changes newer in the gist than here: edits, additions and removals.
     const inGist=new Map(doc.vocab.map(w=>[idOf(w),w])), changes=new Map();
     for(const id of new Set([...inGist.keys(), ...Object.keys(doc.vtime)])){
-      if((doc.vtime[id]||0) > (meta.vtime[id]||0)) changes.set(id, inGist.get(id)||null);
+      const t=doc.vtime[id]||0;
+      if(t > Math.max(meta.vtime[id]||0, sWords[id]||0)){ changes.set(id, inGist.get(id)||null); takenWords[id]=t; }
     }
     const nextVocab=applyWordChanges(changes), wordsChanged=nextVocab!==vocab;
-    if(!saveState(nextVocab, nextProgress, {quiet:true})) return;
+    applyingRemote=true;
+    let ok;
+    try { ok=saveState(nextVocab, nextProgress, {quiet:true}); } finally { applyingRemote=false; }
+    if(!ok) return;
+    const after=syncMeta();
+    Object.assign(after.mtime, takenKeys);
+    Object.assign(after.vtime, takenWords);
+    writeSyncMeta(after);
     if(wordsChanged){ initFilters(); applyFilter(); }
   }
   forget();
@@ -2517,9 +2531,17 @@ function adoptLegacyEntry(legacy, current, legacyBefore){
   if(!current) return {...legacy};
   const next={...current};
   if(!legacyBefore || legacyBefore.fav!==legacy.fav) next.fav=legacy.fav;
-  const answered=legacy.last>(current.last||0) || legacy.correct+legacy.wrong>current.correct+current.wrong;
+  // With the old tab's previous copy, only the answers it added since then count; without it,
+  // the entry counts as answered when it is ahead of the current one.
+  const base=legacyBefore ?? current;
+  const addedRight=Math.max(0, legacy.correct-base.correct), addedWrong=Math.max(0, legacy.wrong-base.wrong);
+  const answered=legacyBefore ? addedRight+addedWrong>0 :
+    legacy.last>(current.last||0) || legacy.correct+legacy.wrong>current.correct+current.wrong;
   if(answered){
-    Object.assign(next, nextSchedule(current, legacy.streak===0 ? "again" : "easy"), {
+    Object.assign(next, nextSchedule(current, legacy.streak===0 ? "again" : "easy"), legacyBefore ? {
+      correct:current.correct+addedRight, wrong:current.wrong+addedWrong,
+      streak:legacy.streak===0 ? 0 : current.streak+addedRight, last:Math.max(legacy.last,current.last||0)
+    } : {
       correct:Math.max(legacy.correct,current.correct), wrong:Math.max(legacy.wrong,current.wrong),
       streak:legacy.streak, last:Math.max(legacy.last,current.last||0)
     });
