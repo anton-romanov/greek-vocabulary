@@ -84,7 +84,7 @@ function legacySchedule(before, forgot, now) {
 }
 const SCHEDULE_FIELDS = ["due", "ivl", "ease", "reps", "lapses", "seen"];
 // An entry from an older app version keeps the stored hint and schedule. If it records a newer
-// answer (its "last" changed; a favourite toggle leaves it alone), the schedule takes a step as the current app would: the old app
+// answer, the schedule takes a step as the current app would: the old app
 // resets the streak on "Не знаю" and raises it on "Знаю".
 function adaptLegacy(entry, before, now) {
   if (!before) return entry;
@@ -92,7 +92,10 @@ function adaptLegacy(entry, before, now) {
   if ("hint" in before) next.hint = before.hint;
   if (!("due" in before)) return next;
   for (const field of SCHEDULE_FIELDS) if (field in before) next[field] = before[field];
-  if (entry.last !== (before.last || 0)) Object.assign(next, legacySchedule(before, entry.streak === 0, now));
+  // A device's own clock or counters may lag behind another device's; either one moving past the
+  // stored entry means a new answer. A favourite toggle from a stale copy moves neither.
+  const answered = entry.last > (before.last || 0) || entry.correct + entry.wrong > before.correct + before.wrong;
+  if (answered) Object.assign(next, legacySchedule(before, entry.streak === 0, now));
   return next;
 }
 
