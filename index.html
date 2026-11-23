@@ -1397,6 +1397,7 @@ function loadState(raw){
   };
 }
 let storedState = readRaw(STATE_KEY);
+const migratingFromV2 = storedState===null && readRaw(LEGACY_STATE_KEY)!==null;
 let {vocab, progress} = loadState(storedState ?? readRaw(LEGACY_STATE_KEY));
 let filtered = [];
 let studyPool = [];
@@ -1564,7 +1565,8 @@ function localDate(d=new Date()){
 // Schedules use the server's clock (learned during sync), so a device whose clock is off does not
 // push reviews into the wrong time for the other devices.
 function clockNow(){
-  return SYNC_ENABLED ? syncClock() : Date.now();
+  // Whole milliseconds: stored times must be integers.
+  return Math.round(SYNC_ENABLED ? syncClock() : Date.now());
 }
 function endOfToday(){
   const d=new Date(); d.setHours(23,59,59,999); return d.getTime();
@@ -1590,13 +1592,13 @@ function srsOf(p){
 function nextSchedule(p, grade, now=clockNow(), keepEase=false){
   let {ivl, ease, reps, lapses}=srsOf(p) ?? {ivl:0, ease:250, reps:0, lapses:0};
   if(grade==="again"){
-    return {due:now+10*60e3, ivl:0, ease:keepEase ? ease : Math.max(130,ease-20), reps:0, lapses:lapses+(reps>0?1:0)};
+    return {due:Math.round(now+10*60e3), ivl:0, ease:keepEase ? ease : Math.max(130,ease-20), reps:0, lapses:lapses+(reps>0?1:0)};
   }
   if(grade==="hard") ivl = reps===0 ? 1 : Math.max(ivl+1, Math.round(ivl*1.2));
   else ivl = reps===0 ? (lapses ? 2 : 3) : reps===1 ? Math.max(ivl+1, 6) : Math.max(ivl+1, Math.round(ivl*ease/100));
   if(!keepEase) ease = grade==="hard" ? Math.max(130,ease-15) : Math.min(300,ease+5);
   ivl=Math.min(ivl,365);
-  return {due:now+ivl*DAY_MS, ivl, ease, reps:reps+1, lapses};
+  return {due:Math.round(now+ivl*DAY_MS), ivl, ease, reps:reps+1, lapses};
 }
 function ivlLabel(s){
   if(!s.ivl) return "10 мин";
@@ -2245,7 +2247,11 @@ $$(".tab").forEach(t=>t.onclick=()=>{
 // Every word and progress entry carries a change time on the server's clock; the server merges
 // what each device sends (newer change wins per item) and returns the result.
 const SYNC_URL = "api/state";
-const SYNC_META_KEY = "greekNotebookSyncMeta";
+// The current version keeps its own sync bookkeeping, apart from what an older tab still writes.
+const SYNC_META_KEY = "greekNotebookSyncMetaV3";
+if(readRaw(SYNC_META_KEY)===null && readRaw("greekNotebookSyncMeta")!==null){
+  try { localStorage.setItem(SYNC_META_KEY, readRaw("greekNotebookSyncMeta")); } catch {}
+}
 const SYNC_ENABLED = location.protocol==="https:" ? !/\.github\.io$/i.test(location.hostname) :
   location.protocol==="http:" && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 let applyingRemote = false;
@@ -2301,8 +2307,19 @@ async function importLegacyGist(){
     if(error.status===401 || error.status===403 || error.status===404) forget();
     return;
   }
-  // The gist predates schedules and hints, so it is sent as an older-format doc.
-  if(doc) await syncRequest("POST", {device:syncDevice(), doc});
+  // The gist predates schedules and hints: fold its newer entries into this browser's state the
+  // way an older tab's answers are folded in; the regular sync then uploads them.
+  if(doc){
+    const meta=syncMeta(), nextProgress={...progress};
+    for(const [key,entry] of Object.entries(doc.progress)){
+      if((doc.mtime[key]||entry.last||0) <= (meta.mtime[key]||0)) continue;
+      nextProgress[key]=adoptLegacyEntry(entry, nextProgress[key]);
+    }
+    const known=new Set(vocab.map(idOf));
+    const added=doc.vocab.filter(w=>!known.has(idOf(w)) && (doc.vtime[idOf(w)]||0) > (meta.vtime[idOf(w)]||0));
+    if(!saveState(added.length ? [...vocab, ...added] : vocab, nextProgress, {quiet:true})) return;
+    if(added.length){ initFilters(); applyFilter(); }
+  }
   forget();
 }
 
@@ -2430,13 +2447,11 @@ async function runSync(){
   let meta=syncMeta();
   if(!meta.seeded){ seedLocalChanges(meta); writeSyncMeta(meta); }
   await importLegacyGist();
+  if(readRaw(LEGACY_MERGE_KEY)) await adoptServerExtras();
   for(let attempt=0; attempt<3; attempt++){
     const sentState=storedState;
     meta=syncMeta();
-    // Until this browser has saved state in the new format (V3), what it holds came from an older
-    // version without schedules or hints, and the server must treat it that way.
-    const format=readRaw(STATE_KEY)===null ? {} : {format:3};
-    const data=await syncRequest("POST", {...format, device:syncDevice(), doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
+    const data=await syncRequest("POST", {format:3, device:syncDevice(), doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
     if(applyServerDoc(data.doc, sentState)) return;
   }
   throw new Error("busy");
@@ -2483,12 +2498,72 @@ setInterval(()=>{ if(document.visibilityState==="visible") scheduleSync(0); }, 5
 
 window.addEventListener("storage", event=>{
   if(event.key===STATE_KEY || event.key===null) syncState(readRaw(STATE_KEY));
-  // Until this browser has saved the new format, follow edits an older tab makes to the old one.
-  else if(event.key===LEGACY_STATE_KEY && storedState===null && readRaw(STATE_KEY)===null){
-    ({vocab, progress}=loadState(readRaw(LEGACY_STATE_KEY)));
-    cardIndex=0; revealed=false; initFilters(); applyFilter();
-  }
+  else if(event.key===LEGACY_STATE_KEY) replayLegacyTab();
 });
+// ---- Moving from the previous version ----
+// The previous version stored state without schedules or hints (V2). On the first start the state
+// is copied to V3 once. A tab still running the old version keeps writing V2 (the server no longer
+// accepts its uploads), so whatever it changes after that is replayed here as answers.
+const LEGACY_MARK_KEY = "greekNotebookV2Seen";
+const LEGACY_MERGE_KEY = "greekNotebookLegacyMerge";
+// An entry written by the previous version: keep this version's hint and schedule; if the old
+// version recorded an answer since, take its counters and move the schedule a step.
+function adoptLegacyEntry(legacy, current){
+  if(!current) return {...legacy};
+  const next={...current, fav:legacy.fav};
+  const answered=legacy.last>(current.last||0) || legacy.correct+legacy.wrong>current.correct+current.wrong;
+  if(answered){
+    Object.assign(next, nextSchedule(current, legacy.streak===0 ? "again" : "easy"), {
+      correct:Math.max(legacy.correct,current.correct), wrong:Math.max(legacy.wrong,current.wrong),
+      streak:legacy.streak, last:Math.max(legacy.last,current.last||0)
+    });
+  }
+  return next;
+}
+function replayLegacyTab(){
+  const raw=readRaw(LEGACY_STATE_KEY), mark=readRaw(LEGACY_MARK_KEY);
+  if(raw===null || mark===null || raw===mark) return;
+  const before=loadState(mark), after=loadState(raw), nextProgress={...progress};
+  let changed=false;
+  for(const [key,entry] of Object.entries(after.progress)){
+    if(JSON.stringify(before.progress[key])===JSON.stringify(entry)) continue;
+    nextProgress[key]=adoptLegacyEntry(entry, nextProgress[key]);
+    changed=true;
+  }
+  // Words the old tab added, removed or renamed. Its progress resets are not replayed.
+  const ids=list=>new Set(list.map(idOf)), was=ids(before.vocab), now=ids(after.vocab), here=ids(vocab);
+  const added=after.vocab.filter(w=>!was.has(idOf(w)) && !here.has(idOf(w)));
+  const removed=new Set([...was].filter(id=>!now.has(id) && here.has(id)));
+  const nextVocab=added.length || removed.size ? [...vocab.filter(w=>!removed.has(idOf(w))), ...added] : vocab;
+  if(nextVocab!==vocab) changed=true;
+  if(changed && !saveState(nextVocab, nextProgress, {quiet:true})) return;
+  try { localStorage.setItem(LEGACY_MARK_KEY, raw); } catch {}
+  if(changed){ initFilters(); applyFilter(); }
+}
+// Right after the move, this browser's entries have no schedules or hints. Before its first
+// upload, take those from the server so the upload does not erase them.
+async function adoptServerExtras(){
+  const data=await syncRequest("GET");
+  const server=normalizeProgress(data.doc?.progress), nextProgress={...progress};
+  let changed=false;
+  for(const [key,entry] of Object.entries(server)){
+    const local=nextProgress[key];
+    if(!local || ![...EXTRA_FIELDS,"hint"].some(f=>f in entry && !(f in local))) continue;
+    nextProgress[key]=adoptLegacyEntry(local, entry);
+    changed=true;
+  }
+  if(changed && !saveState(vocab, nextProgress, {quiet:true})) throw new Error("busy");
+  try { localStorage.removeItem(LEGACY_MERGE_KEY); } catch {}
+  if(changed){ renderStats(); renderList(); renderCard(); }
+}
+if(migratingFromV2){
+  try {
+    localStorage.setItem(LEGACY_MARK_KEY, readRaw(LEGACY_STATE_KEY));
+    localStorage.setItem(LEGACY_MERGE_KEY, "1");
+  } catch {}
+  saveState(vocab, progress, {quiet:true});
+}
+replayLegacyTab();
 initFilters();applyFilter();updateFiltersBtn();renderSyncUi();scheduleSync(500);
 if("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
 </script>

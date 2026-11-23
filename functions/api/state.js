@@ -72,35 +72,7 @@ const wordId = w => (w.greek + "|" + w.russian).normalize("NFC");
 
 // Newer change wins per word and per progress entry; on a tie the stored version stays.
 // A recorded time without an item is a deletion.
-const DAY_MS = 864e5;
-// The same steps as nextSchedule in index.html, for answers sent by older app versions.
-function legacySchedule(before, forgot, now) {
-  const ivl0 = before.ivl || 0, ease0 = before.ease || 250, reps0 = before.reps || 0, lapses0 = before.lapses || 0;
-  if (forgot) {
-    return { due: now + 10 * 60e3, ivl: 0, ease: Math.max(130, ease0 - 20), reps: 0, lapses: lapses0 + (reps0 > 0 ? 1 : 0) };
-  }
-  const ivl = Math.min(365, reps0 === 0 ? (lapses0 ? 2 : 3) : reps0 === 1 ? Math.max(ivl0 + 1, 6) : Math.max(ivl0 + 1, Math.round(ivl0 * ease0 / 100)));
-  return { due: now + ivl * DAY_MS, ivl, ease: Math.min(300, ease0 + 5), reps: reps0 + 1, lapses: lapses0 };
-}
-const SCHEDULE_FIELDS = ["due", "ivl", "ease", "reps", "lapses", "seen"];
-// An entry from an older app version keeps the stored hint and schedule. If it records a newer
-// answer, the schedule takes a step as the current app would: the old app
-// resets the streak on "Не знаю" and raises it on "Знаю".
-function adaptLegacy(entry, before, now) {
-  if (!before) return entry;
-  const next = { ...entry };
-  if ("hint" in before) next.hint = before.hint;
-  if (!("due" in before)) return next;
-  for (const field of SCHEDULE_FIELDS) if (field in before) next[field] = before[field];
-  // A device's own clock or counters may lag behind another device's; either one moving past the
-  // stored entry means a new answer. A favourite toggle from a stale copy moves neither.
-  const answered = entry.last > (before.last || 0) || entry.correct + entry.wrong > before.correct + before.wrong;
-  if (answered) Object.assign(next, legacySchedule(before, entry.streak === 0, now));
-  return next;
-}
-
-// legacy: the incoming doc comes from an older app version (see adaptLegacy).
-export function mergeDocs(stored, incoming, now, legacy = false) {
+export function mergeDocs(stored, incoming, now) {
   const limit = now + FUTURE_SLACK;
   const clamp = t => Math.min(t, limit);
 
@@ -113,13 +85,7 @@ export function mergeDocs(stored, incoming, now, legacy = false) {
     ...Object.keys(stored.mtime), ...Object.keys(incoming.mtime)])) {
     const st = clamp(progressTime(stored, key)), it = clamp(progressTime(incoming, key));
     let entry;
-    if (it > st) {
-      entry = own(incoming.progress, key);
-      const before = own(stored.progress, key);
-      if (entry && legacy) entry = adaptLegacy(entry, before, now);
-      // An older version's reset or import removes entries; like the current reset, keep the hint.
-      else if (!entry && legacy && before?.hint) entry = { correct: 0, wrong: 0, streak: 0, last: 0, fav: false, hint: before.hint };
-    }
+    if (it > st) entry = own(incoming.progress, key);
     else if (st > it) entry = own(stored.progress, key);
     else entry = own(stored.progress, key) ?? (Object.hasOwn(stored.mtime, key) ? undefined : own(incoming.progress, key));
     if (entry) progress[key] = entry;
@@ -215,12 +181,15 @@ export async function onRequest({ request, env, data }) {
   if (raw === null) return json({ error: "too large" }, 413);
   let body;
   try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
+  // Older app versions do not know review schedules and hints and would erase them. They get the
+  // "signed out" answer, which tells the learner to reload; the reloaded app is the current one and
+  // picks up what the old tab saved locally (see replayLegacyTab in index.html).
+  if (body?.format !== 3) return json({ error: "reload to update" }, 401);
   const device = body?.device;
   if (typeof device !== "string" || !DEVICE.test(device)) return json({ error: "bad device" }, 400);
 
   const { all, own } = await loadAll(env, data.user, device);
-  // Older app versions (no format 3) do not know schedules and hints; mergeDocs adapts their entries.
-  const merged = mergeDocs(all, cleanDoc(body?.doc), Date.now(), body?.format !== 3);
+  const merged = mergeDocs(all, cleanDoc(body?.doc), Date.now());
   if (JSON.stringify(merged) !== JSON.stringify(own)) {
     try {
       await env.STATE.put(`state:${data.user}:${device}`, JSON.stringify(merged), { metadata: { t: Date.now() } });
