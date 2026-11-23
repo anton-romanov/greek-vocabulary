@@ -72,10 +72,7 @@ const wordId = w => (w.greek + "|" + w.russian).normalize("NFC");
 
 // Newer change wins per word and per progress entry; on a tie the stored version stays.
 // A recorded time without an item is a deletion.
-// keepExtras: the incoming doc comes from an app version that does not know the optional fields.
-// A newer entry from it keeps the learner's hint; its old schedule is dropped, because that answer
-// was not scheduled (the app then derives a schedule from the counters).
-export function mergeDocs(stored, incoming, now, keepExtras = false) {
+export function mergeDocs(stored, incoming, now) {
   const limit = now + FUTURE_SLACK;
   const clamp = t => Math.min(t, limit);
 
@@ -88,14 +85,8 @@ export function mergeDocs(stored, incoming, now, keepExtras = false) {
     ...Object.keys(stored.mtime), ...Object.keys(incoming.mtime)])) {
     const st = clamp(progressTime(stored, key)), it = clamp(progressTime(incoming, key));
     let entry;
-    if (it > st) {
-      entry = own(incoming.progress, key);
-      const before = own(stored.progress, key);
-      if (keepExtras && entry && before) {
-        entry = { ...entry };
-        if ("hint" in before && !("hint" in entry)) entry.hint = before.hint;
-      }
-    } else if (st > it) entry = own(stored.progress, key);
+    if (it > st) entry = own(incoming.progress, key);
+    else if (st > it) entry = own(stored.progress, key);
     else entry = own(stored.progress, key) ?? (Object.hasOwn(stored.mtime, key) ? undefined : own(incoming.progress, key));
     if (entry) progress[key] = entry;
     const t = Math.max(st, it);
@@ -190,12 +181,14 @@ export async function onRequest({ request, env, data }) {
   if (raw === null) return json({ error: "too large" }, 413);
   let body;
   try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
+  // Older app versions do not know review schedules and hints and would drop them on every
+  // write, so only the current format (3) may write; an old tab saves after it reloads.
+  if (body?.format !== 3) return json({ error: "update the app" }, 409);
   const device = body?.device;
   if (typeof device !== "string" || !DEVICE.test(device)) return json({ error: "bad device" }, 400);
 
   const { all, own } = await loadAll(env, data.user, device);
-  // Current clients send format 3; anything else is an older app version (see mergeDocs).
-  const merged = mergeDocs(all, cleanDoc(body?.doc), Date.now(), body?.format !== 3);
+  const merged = mergeDocs(all, cleanDoc(body?.doc), Date.now());
   if (JSON.stringify(merged) !== JSON.stringify(own)) {
     try {
       await env.STATE.put(`state:${data.user}:${device}`, JSON.stringify(merged), { metadata: { t: Date.now() } });

@@ -1561,6 +1561,11 @@ setInterval(()=>{
 function localDate(d=new Date()){
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 }
+// Schedules use the server's clock (learned during sync), so a device whose clock is off does not
+// push reviews into the wrong time for the other devices.
+function clockNow(){
+  return SYNC_ENABLED ? syncClock() : Date.now();
+}
 function endOfToday(){
   const d=new Date(); d.setHours(23,59,59,999); return d.getTime();
 }
@@ -1582,7 +1587,7 @@ function srsOf(p){
   }
   return null;
 }
-function nextSchedule(p, grade, now=Date.now(), keepEase=false){
+function nextSchedule(p, grade, now=clockNow(), keepEase=false){
   let {ivl, ease, reps, lapses}=srsOf(p) ?? {ivl:0, ease:250, reps:0, lapses:0};
   if(grade==="again"){
     return {due:now+10*60e3, ivl:0, ease:keepEase ? ease : Math.max(130,ease-20), reps:0, lapses:lapses+(reps>0?1:0)};
@@ -1628,7 +1633,7 @@ function streakDays(){
 // word, "recognize" is picking or hearing it. Tests move only cards that are due (or reset a
 // forgotten one); new words enter through the cards, within the daily limit.
 function answer(w, grade, mode){
-  const key=idOf(w), p={...pFor(w)}, now=Date.now();
+  const key=idOf(w), p={...pFor(w)}, now=clockNow();
   const s=srsOf(p), isNew=!s;
   // A test answer about a word not yet studied only counts toward the day: the word itself
   // stays new and enters the plan through the cards, within the daily limit.
@@ -1644,7 +1649,7 @@ function answer(w, grade, mode){
   return saveState(vocab, withDayCount({...progress, [key]:p}, isNew && mode==="card"));
 }
 function buildQueue(cards){
-  const now=Date.now(), eod=endOfToday(), dueNow=[], later=[], fresh=[];
+  const now=clockNow(), eod=endOfToday()+(now-Date.now()), dueNow=[], later=[], fresh=[];
   for(const card of cards){
     const s=srsOf(pFor(card));
     if(!s) fresh.push(card);
@@ -1855,7 +1860,7 @@ function renderCard(){
   forms.hidden=!(revealed && w?.verbs.length);
   forms.innerHTML=forms.hidden ? "" : verbMarkup(w.verbs);
   if(!w){
-    const wait=queueInfo.nextDue ? Math.max(1, Math.ceil((queueInfo.nextDue-Date.now())/60e3)) : 0;
+    const wait=queueInfo.nextDue ? Math.max(1, Math.ceil((queueInfo.nextDue-clockNow())/60e3)) : 0;
     $("#cardHint").textContent=!done ? "Измените фильтр или поиск" : wait ?
       `Забытые слова (${queueInfo.later}) вернутся через ${wait} мин` : "Повторы и новые слова на сегодня пройдены";
     $("#cardPrompt").textContent=!done ? "Ничего не найдено" : wait ? "Небольшой перерыв ☕" : "На сегодня всё 🎉";
@@ -1936,7 +1941,7 @@ const QUIZ_HINTS = {
 };
 // Tests ask mostly about words already studied, preferring ones that are due.
 function pickQuizCard(pool){
-  const now=Date.now();
+  const now=clockNow();
   const seen=pool.filter(w=>srsOf(pFor(w)));
   const due=seen.filter(w=>srsOf(pFor(w)).due<=now);
   const from=due.length && Math.random()<.7 ? due : seen.length ? seen : pool;
@@ -2296,7 +2301,7 @@ async function importLegacyGist(){
     if(error.status===401 || error.status===403 || error.status===404) forget();
     return;
   }
-  if(doc) await syncRequest("POST", {device:syncDevice(), doc});
+  if(doc) await syncRequest("POST", {format:3, device:syncDevice(), doc});
   forget();
 }
 
