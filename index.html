@@ -2315,10 +2315,14 @@ async function importLegacyGist(){
       if((doc.mtime[key]||entry.last||0) <= (meta.mtime[key]||0)) continue;
       nextProgress[key]=adoptLegacyEntry(entry, nextProgress[key]);
     }
-    const known=new Set(vocab.map(idOf));
-    const added=doc.vocab.filter(w=>!known.has(idOf(w)) && (doc.vtime[idOf(w)]||0) > (meta.vtime[idOf(w)]||0));
-    if(!saveState(added.length ? [...vocab, ...added] : vocab, nextProgress, {quiet:true})) return;
-    if(added.length){ initFilters(); applyFilter(); }
+    // Word changes newer in the gist than here: edits, additions and removals.
+    const inGist=new Map(doc.vocab.map(w=>[idOf(w),w])), changes=new Map();
+    for(const id of new Set([...inGist.keys(), ...Object.keys(doc.vtime)])){
+      if((doc.vtime[id]||0) > (meta.vtime[id]||0)) changes.set(id, inGist.get(id)||null);
+    }
+    const nextVocab=applyWordChanges(changes), wordsChanged=nextVocab!==vocab;
+    if(!saveState(nextVocab, nextProgress, {quiet:true})) return;
+    if(wordsChanged){ initFilters(); applyFilter(); }
   }
   forget();
 }
@@ -2508,9 +2512,11 @@ const LEGACY_MARK_KEY = "greekNotebookV2Seen";
 const LEGACY_MERGE_KEY = "greekNotebookLegacyMerge";
 // An entry written by the previous version: keep this version's hint and schedule; if the old
 // version recorded an answer since, take its counters and move the schedule a step.
-function adoptLegacyEntry(legacy, current){
+// legacyBefore, when known, is the old tab's previous copy: a favourite is taken only if it changed.
+function adoptLegacyEntry(legacy, current, legacyBefore){
   if(!current) return {...legacy};
-  const next={...current, fav:legacy.fav};
+  const next={...current};
+  if(!legacyBefore || legacyBefore.fav!==legacy.fav) next.fav=legacy.fav;
   const answered=legacy.last>(current.last||0) || legacy.correct+legacy.wrong>current.correct+current.wrong;
   if(answered){
     Object.assign(next, nextSchedule(current, legacy.streak===0 ? "again" : "easy"), {
@@ -2527,34 +2533,60 @@ function replayLegacyTab(){
   let changed=false;
   for(const [key,entry] of Object.entries(after.progress)){
     if(JSON.stringify(before.progress[key])===JSON.stringify(entry)) continue;
-    nextProgress[key]=adoptLegacyEntry(entry, nextProgress[key]);
+    nextProgress[key]=adoptLegacyEntry(entry, nextProgress[key], before.progress[key]);
     changed=true;
   }
-  // Words the old tab added, removed or renamed. Its progress resets are not replayed.
-  const ids=list=>new Set(list.map(idOf)), was=ids(before.vocab), now=ids(after.vocab), here=ids(vocab);
-  const added=after.vocab.filter(w=>!was.has(idOf(w)) && !here.has(idOf(w)));
-  const removed=new Set([...was].filter(id=>!now.has(id) && here.has(id)));
-  const nextVocab=added.length || removed.size ? [...vocab.filter(w=>!removed.has(idOf(w))), ...added] : vocab;
+  // Words the old tab added, edited, removed or renamed. Its progress resets are not replayed.
+  const was=new Map(before.vocab.map(w=>[idOf(w),w])), now=new Map(after.vocab.map(w=>[idOf(w),w]));
+  const changes=new Map();
+  for(const [id,w] of now) if(JSON.stringify(was.get(id))!==JSON.stringify(w)) changes.set(id,w);
+  for(const id of was.keys()) if(!now.has(id)) changes.set(id,null);
+  const nextVocab=applyWordChanges(changes);
   if(nextVocab!==vocab) changed=true;
   if(changed && !saveState(nextVocab, nextProgress, {quiet:true})) return;
   try { localStorage.setItem(LEGACY_MARK_KEY, raw); } catch {}
   if(changed){ initFilters(); applyFilter(); }
 }
+// Applies word changes (id -> new word, or null to remove) to the current list.
+function applyWordChanges(changes){
+  if(!changes.size) return vocab;
+  const next=[], seen=new Set();
+  for(const w of vocab){
+    const id=idOf(w);
+    seen.add(id);
+    if(!changes.has(id)) next.push(w);
+    else if(changes.get(id)) next.push(changes.get(id));
+  }
+  for(const [id,w] of changes) if(w && !seen.has(id)) next.push(w);
+  return next;
+}
 // Right after the move, this browser's entries have no schedules or hints. Before its first
 // upload, take those from the server so the upload does not erase them.
 async function adoptServerExtras(){
   const data=await syncRequest("GET");
-  const server=normalizeProgress(data.doc?.progress), nextProgress={...progress};
-  let changed=false;
+  const server=normalizeProgress(data.doc?.progress), serverTimes=timeMap(data.doc?.mtime);
+  const meta=syncMeta(), nextProgress={...progress}, fromServer=[];
+  let newer=false;
   for(const [key,entry] of Object.entries(server)){
     const local=nextProgress[key];
     if(!local || ![...EXTRA_FIELDS,"hint"].some(f=>f in entry && !(f in local))) continue;
-    nextProgress[key]=adoptLegacyEntry(local, entry);
-    changed=true;
+    // Only a change this browser made after the server's copy counts as a new answer; otherwise
+    // the server's entry is simply taken, without a new change time.
+    if((meta.mtime[key]||0) > (serverTimes[key]||0)){ nextProgress[key]=adoptLegacyEntry(local, entry); newer=true; }
+    else { nextProgress[key]=entry; fromServer.push(key); }
   }
-  if(changed && !saveState(vocab, nextProgress, {quiet:true})) throw new Error("busy");
+  if(newer || fromServer.length){
+    applyingRemote=!newer;
+    let ok;
+    try { ok=saveState(vocab, nextProgress, {quiet:true}); } finally { applyingRemote=false; }
+    if(!ok) throw new Error("busy");
+    // Entries copied from the server keep the server's time, so they do not look newer.
+    const after=syncMeta();
+    for(const key of fromServer) after.mtime[key]=serverTimes[key]||0;
+    writeSyncMeta(after);
+    renderStats(); renderList(); renderCard();
+  }
   try { localStorage.removeItem(LEGACY_MERGE_KEY); } catch {}
-  if(changed){ renderStats(); renderList(); renderCard(); }
 }
 if(migratingFromV2){
   try {
