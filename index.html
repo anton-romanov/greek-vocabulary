@@ -2301,7 +2301,8 @@ async function importLegacyGist(){
     if(error.status===401 || error.status===403 || error.status===404) forget();
     return;
   }
-  if(doc) await syncRequest("POST", {format:3, device:syncDevice(), doc});
+  // The gist predates schedules and hints, so it is sent as an older-format doc.
+  if(doc) await syncRequest("POST", {device:syncDevice(), doc});
   forget();
 }
 
@@ -2432,7 +2433,10 @@ async function runSync(){
   for(let attempt=0; attempt<3; attempt++){
     const sentState=storedState;
     meta=syncMeta();
-    const data=await syncRequest("POST", {format:3, device:syncDevice(), doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
+    // Until this browser has saved state in the new format (V3), what it holds came from an older
+    // version without schedules or hints, and the server must treat it that way.
+    const format=readRaw(STATE_KEY)===null ? {} : {format:3};
+    const data=await syncRequest("POST", {...format, device:syncDevice(), doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
     if(applyServerDoc(data.doc, sentState)) return;
   }
   throw new Error("busy");

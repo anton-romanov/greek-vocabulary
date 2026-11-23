@@ -74,24 +74,25 @@ const wordId = w => (w.greek + "|" + w.russian).normalize("NFC");
 // A recorded time without an item is a deletion.
 const DAY_MS = 864e5;
 // The same steps as nextSchedule in index.html, for answers sent by older app versions.
-function legacySchedule(before, after, now) {
+function legacySchedule(before, forgot, now) {
   const ivl0 = before.ivl || 0, ease0 = before.ease || 250, reps0 = before.reps || 0, lapses0 = before.lapses || 0;
-  if (after.wrong > before.wrong) {
+  if (forgot) {
     return { due: now + 10 * 60e3, ivl: 0, ease: Math.max(130, ease0 - 20), reps: 0, lapses: lapses0 + (reps0 > 0 ? 1 : 0) };
   }
   const ivl = Math.min(365, reps0 === 0 ? (lapses0 ? 2 : 3) : reps0 === 1 ? Math.max(ivl0 + 1, 6) : Math.max(ivl0 + 1, Math.round(ivl0 * ease0 / 100)));
   return { due: now + ivl * DAY_MS, ivl, ease: Math.min(300, ease0 + 5), reps: reps0 + 1, lapses: lapses0 };
 }
 const SCHEDULE_FIELDS = ["due", "ivl", "ease", "reps", "lapses", "seen"];
-// An entry from an older app version keeps the stored hint and schedule; if it records a new
-// answer ("Знаю" / "Не знаю" counters went up) the schedule moves on as the current app would.
+// An entry from an older app version keeps the stored hint and schedule. If it records a newer
+// answer (its "last" moved on), the schedule takes a step as the current app would: the old app
+// resets the streak on "Не знаю" and raises it on "Знаю".
 function adaptLegacy(entry, before, now) {
   if (!before) return entry;
   const next = { ...entry };
   if ("hint" in before) next.hint = before.hint;
   if (!("due" in before)) return next;
   for (const field of SCHEDULE_FIELDS) if (field in before) next[field] = before[field];
-  if (entry.wrong > before.wrong || entry.correct > before.correct) Object.assign(next, legacySchedule(before, entry, now));
+  if (entry.last > (before.last || 0)) Object.assign(next, legacySchedule(before, entry.streak === 0, now));
   return next;
 }
 
@@ -113,9 +114,10 @@ export function mergeDocs(stored, incoming, now, legacy = false) {
     if (it > st) {
       entry = own(incoming.progress, key);
       if (entry && legacy) entry = adaptLegacy(entry, own(stored.progress, key), now);
-      // A change stamped in the future came from a clock that runs ahead: move its review date back.
+      // A change stamped in the future came from a clock that runs ahead: move the review date it
+      // set back by the same amount. (Older versions never set one; adaptLegacy uses server time.)
       const skew = rawIt - now;
-      if (entry && skew > FUTURE_SLACK && entry.due) entry = { ...entry, due: Math.max(0, entry.due - skew) };
+      if (entry && !legacy && skew > FUTURE_SLACK && entry.due) entry = { ...entry, due: Math.max(0, entry.due - skew) };
     }
     else if (st > it) entry = own(stored.progress, key);
     else entry = own(stored.progress, key) ?? (Object.hasOwn(stored.mtime, key) ? undefined : own(incoming.progress, key));
