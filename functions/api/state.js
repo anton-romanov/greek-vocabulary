@@ -84,7 +84,7 @@ function legacySchedule(before, forgot, now) {
 }
 const SCHEDULE_FIELDS = ["due", "ivl", "ease", "reps", "lapses", "seen"];
 // An entry from an older app version keeps the stored hint and schedule. If it records a newer
-// answer (its "last" moved on), the schedule takes a step as the current app would: the old app
+// answer (its "last" changed; a favourite toggle leaves it alone), the schedule takes a step as the current app would: the old app
 // resets the streak on "Не знаю" and raises it on "Знаю".
 function adaptLegacy(entry, before, now) {
   if (!before) return entry;
@@ -92,7 +92,7 @@ function adaptLegacy(entry, before, now) {
   if ("hint" in before) next.hint = before.hint;
   if (!("due" in before)) return next;
   for (const field of SCHEDULE_FIELDS) if (field in before) next[field] = before[field];
-  if (entry.last > (before.last || 0)) Object.assign(next, legacySchedule(before, entry.streak === 0, now));
+  if (entry.last !== (before.last || 0)) Object.assign(next, legacySchedule(before, entry.streak === 0, now));
   return next;
 }
 
@@ -108,16 +108,11 @@ export function mergeDocs(stored, incoming, now, legacy = false) {
   };
   for (const key of new Set([...Object.keys(stored.progress), ...Object.keys(incoming.progress),
     ...Object.keys(stored.mtime), ...Object.keys(incoming.mtime)])) {
-    const rawIt = progressTime(incoming, key);
-    const st = clamp(progressTime(stored, key)), it = clamp(rawIt);
+    const st = clamp(progressTime(stored, key)), it = clamp(progressTime(incoming, key));
     let entry;
     if (it > st) {
       entry = own(incoming.progress, key);
       if (entry && legacy) entry = adaptLegacy(entry, own(stored.progress, key), now);
-      // A change stamped in the future came from a clock that runs ahead: move the review date it
-      // set back by the same amount. (Older versions never set one; adaptLegacy uses server time.)
-      const skew = rawIt - now;
-      if (entry && !legacy && skew > FUTURE_SLACK && entry.due) entry = { ...entry, due: Math.max(0, entry.due - skew) };
     }
     else if (st > it) entry = own(stored.progress, key);
     else entry = own(stored.progress, key) ?? (Object.hasOwn(stored.mtime, key) ? undefined : own(incoming.progress, key));
