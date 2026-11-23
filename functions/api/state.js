@@ -72,8 +72,9 @@ const wordId = w => (w.greek + "|" + w.russian).normalize("NFC");
 
 // Newer change wins per word and per progress entry; on a tie the stored version stays.
 // A recorded time without an item is a deletion.
-// keepExtras: the incoming doc comes from an app version that does not know the optional fields,
-// so a newer entry from it keeps the stored schedule and hint instead of dropping them.
+// keepExtras: the incoming doc comes from an app version that does not know the optional fields.
+// A newer entry from it keeps the learner's hint; its old schedule is dropped, because that answer
+// was not scheduled (the app then derives a schedule from the counters).
 export function mergeDocs(stored, incoming, now, keepExtras = false) {
   const limit = now + FUTURE_SLACK;
   const clamp = t => Math.min(t, limit);
@@ -92,7 +93,7 @@ export function mergeDocs(stored, incoming, now, keepExtras = false) {
       const before = own(stored.progress, key);
       if (keepExtras && entry && before) {
         entry = { ...entry };
-        for (const field of [...EXTRA_FIELDS, "hint"]) if (field in before && !(field in entry)) entry[field] = before[field];
+        if ("hint" in before && !("hint" in entry)) entry.hint = before.hint;
       }
     } else if (st > it) entry = own(stored.progress, key);
     else entry = own(stored.progress, key) ?? (Object.hasOwn(stored.mtime, key) ? undefined : own(incoming.progress, key));

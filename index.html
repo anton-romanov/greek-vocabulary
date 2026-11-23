@@ -1633,10 +1633,12 @@ function answer(w, grade, mode){
   // A test answer about a word not yet studied only counts toward the day: the word itself
   // stays new and enters the plan through the cards, within the daily limit.
   if(isNew && mode!=="card") return saveState(vocab, withDayCount(progress, false));
+  // The schedule comes from the state before this answer, as the buttons preview it.
+  const schedule=nextSchedule(pFor(w), grade, now, mode==="recognize");
   if(grade==="again"){ p.wrong++; p.streak=0; } else { p.correct++; p.streak++; }
   p.last=now;
   if(mode==="card" || (s && (grade==="again" || s.due<=now))){
-    Object.assign(p, nextSchedule(p, grade, now, mode==="recognize"));
+    Object.assign(p, schedule);
     if(isNew) p.seen=now;
   }
   return saveState(vocab, withDayCount({...progress, [key]:p}, isNew && mode==="card"));
@@ -2472,6 +2474,11 @@ setInterval(()=>{ if(document.visibilityState==="visible") scheduleSync(0); }, 5
 
 window.addEventListener("storage", event=>{
   if(event.key===STATE_KEY || event.key===null) syncState(readRaw(STATE_KEY));
+  // Until this browser has saved the new format, follow edits an older tab makes to the old one.
+  else if(event.key===LEGACY_STATE_KEY && storedState===null && readRaw(STATE_KEY)===null){
+    ({vocab, progress}=loadState(readRaw(LEGACY_STATE_KEY)));
+    cardIndex=0; revealed=false; initFilters(); applyFilter();
+  }
 });
 initFilters();applyFilter();updateFiltersBtn();renderSyncUi();scheduleSync(500);
 if("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
