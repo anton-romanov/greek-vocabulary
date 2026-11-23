@@ -72,7 +72,9 @@ const wordId = w => (w.greek + "|" + w.russian).normalize("NFC");
 
 // Newer change wins per word and per progress entry; on a tie the stored version stays.
 // A recorded time without an item is a deletion.
-export function mergeDocs(stored, incoming, now) {
+// keepExtras: the incoming doc comes from an app version that does not know the optional fields,
+// so a newer entry from it keeps the stored schedule and hint instead of dropping them.
+export function mergeDocs(stored, incoming, now, keepExtras = false) {
   const limit = now + FUTURE_SLACK;
   const clamp = t => Math.min(t, limit);
 
@@ -85,8 +87,14 @@ export function mergeDocs(stored, incoming, now) {
     ...Object.keys(stored.mtime), ...Object.keys(incoming.mtime)])) {
     const st = clamp(progressTime(stored, key)), it = clamp(progressTime(incoming, key));
     let entry;
-    if (it > st) entry = own(incoming.progress, key);
-    else if (st > it) entry = own(stored.progress, key);
+    if (it > st) {
+      entry = own(incoming.progress, key);
+      const before = own(stored.progress, key);
+      if (keepExtras && entry && before) {
+        entry = { ...entry };
+        for (const field of [...EXTRA_FIELDS, "hint"]) if (field in before && !(field in entry)) entry[field] = before[field];
+      }
+    } else if (st > it) entry = own(stored.progress, key);
     else entry = own(stored.progress, key) ?? (Object.hasOwn(stored.mtime, key) ? undefined : own(incoming.progress, key));
     if (entry) progress[key] = entry;
     const t = Math.max(st, it);
@@ -185,7 +193,8 @@ export async function onRequest({ request, env, data }) {
   if (typeof device !== "string" || !DEVICE.test(device)) return json({ error: "bad device" }, 400);
 
   const { all, own } = await loadAll(env, data.user, device);
-  const merged = mergeDocs(all, cleanDoc(body?.doc), Date.now());
+  // Current clients send format 3; anything else is an older app version (see mergeDocs).
+  const merged = mergeDocs(all, cleanDoc(body?.doc), Date.now(), body?.format !== 3);
   if (JSON.stringify(merged) !== JSON.stringify(own)) {
     try {
       await env.STATE.put(`state:${data.user}:${device}`, JSON.stringify(merged), { metadata: { t: Date.now() } });

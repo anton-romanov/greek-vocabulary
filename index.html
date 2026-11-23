@@ -1630,6 +1630,9 @@ function streakDays(){
 function answer(w, grade, mode){
   const key=idOf(w), p={...pFor(w)}, now=Date.now();
   const s=srsOf(p), isNew=!s;
+  // A test answer about a word not yet studied only counts toward the day: the word itself
+  // stays new and enters the plan through the cards, within the daily limit.
+  if(isNew && mode!=="card") return saveState(vocab, withDayCount(progress, false));
   if(grade==="again"){ p.wrong++; p.streak=0; } else { p.correct++; p.streak++; }
   p.last=now;
   if(mode==="card" || (s && (grade==="again" || s.due<=now))){
@@ -2422,7 +2425,7 @@ async function runSync(){
   for(let attempt=0; attempt<3; attempt++){
     const sentState=storedState;
     meta=syncMeta();
-    const data=await syncRequest("POST", {device:syncDevice(), doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
+    const data=await syncRequest("POST", {format:3, device:syncDevice(), doc:{vocab, vtime:meta.vtime, progress, mtime:meta.mtime}});
     if(applyServerDoc(data.doc, sentState)) return;
   }
   throw new Error("busy");
