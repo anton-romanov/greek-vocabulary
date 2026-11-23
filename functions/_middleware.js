@@ -92,6 +92,7 @@ function loginPage(error = "", login = "") {
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
+<meta name="color-scheme" content="light dark">
 <title>Ελληνικά — вход</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -109,6 +110,7 @@ label{display:grid;gap:5px;font-weight:650;font-size:14px}
 input{font:inherit;font-size:16px;width:100%;border:1px solid var(--line);border-radius:13px;padding:13px 12px;background:#fff;color:var(--ink)}
 button{font:inherit;font-size:16px;font-weight:750;min-height:50px;border:0;border-radius:15px;background:var(--accent);color:#fff;margin-top:6px}
 .error{color:var(--bad);font-weight:650}
+@media (prefers-color-scheme:dark){:root{--bg:#101512;--card:#18201b;--ink:#e6ece7;--muted:#97a39a;--line:#2b362f;--accent:#6fcf97;--bad:#f09090;--shadow:0 10px 30px rgba(0,0,0,.35)}input{background:var(--card)}button{color:#0b1a11}}
 </style></head>
 <body><form method="post" action="/login">
 <h1>Ελληνικά</h1>

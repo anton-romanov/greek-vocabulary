@@ -7,7 +7,10 @@ if grep -q 'id = "KV_NAMESPACE_ID"' wrangler.toml; then
   echo "wrangler.toml still has the placeholder KV namespace id; create the namespace and put its id there." >&2
   exit 1
 fi
+# Course dictionaries come from the private offline copy of the course and are never committed.
+if [ -d "$HOME/greekby/content" ]; then python3 tools/build-lessons.py; fi
+[ -f lessons.js ] || echo "// Course dictionaries are not available in this build." > lessons.js
 rm -rf dist
 mkdir dist
-cp index.html sw.js manifest.webmanifest icon-192.png icon-512.png _headers dist/
+cp index.html lessons.js sw.js manifest.webmanifest icon-192.png icon-512.png _headers dist/
 npx -y wrangler@4.166.0 pages deploy --project-name greek-vocabulary --branch main --commit-dirty=true

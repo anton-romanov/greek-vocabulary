@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://gist.githubusercontent.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
-<meta name="theme-color" content="#f6f7f3">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f7f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101512" media="(prefers-color-scheme: dark)">
 <title>Ελληνικά — мои слова</title>
 <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,7 +18,8 @@
 :root{
   --bg:#f6f7f3;--card:#fff;--ink:#17211b;--muted:#6d786f;--line:#dfe5df;
   --accent:#2d6a4f;--accent2:#40916c;--soft:#e9f5ee;--bad:#9b3d3d;--good:#276749;
-  --shadow:0 10px 30px rgba(20,40,25,.08);--radius:22px
+  --shadow:0 10px 30px rgba(20,40,25,.08);--radius:22px;
+  --g-m:#1d5fbf;--g-f:#b4234a;--g-n:#7a3fb8
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
@@ -126,7 +129,7 @@ button{cursor:pointer}
 .mnemo-box textarea{resize:vertical;font:inherit}
 .done-box{text-align:center;margin-top:12px}
 .done-box .sync-actions{justify-content:center}
-.quiz-modes{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:6px}
+.quiz-modes{display:grid;grid-template-columns:repeat(5,1fr);margin-bottom:6px}
 .quiz-modes button{padding:9px 4px}
 .write-form{display:grid;grid-template-columns:1fr auto;gap:10px}
 .write-form .input{font-size:18px}
@@ -185,6 +188,38 @@ button{cursor:pointer}
  .row .ru{grid-column:1/2}
  .row-actions{grid-column:2;grid-row:1/3}
  .actions{grid-template-columns:repeat(3,1fr)}
+ .quiz-modes button{font-size:13px;padding:9px 2px}
+}
+.g-m{color:var(--g-m)}.g-f{color:var(--g-f)}.g-n{color:var(--g-n)}
+.art{font-weight:600;opacity:.7}
+.gender-legend{font-weight:700}
+.chip-x{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 4px;font:inherit}
+.lesson-panel{margin-bottom:14px}
+.lesson-panel .control{margin:12px 0 8px}
+.lesson-panel [hidden]{display:none}
+.row .hard-mark{color:var(--bad);font-weight:700}
+@media (prefers-color-scheme:dark){
+ :root{--bg:#101512;--card:#18201b;--ink:#e6ece7;--muted:#97a39a;--line:#2b362f;--accent:#6fcf97;--accent2:#52b788;--soft:#1c2b22;--bad:#f09090;--good:#7ddc9f;--shadow:0 10px 30px rgba(0,0,0,.35);--g-m:#86b6ff;--g-f:#ff94ab;--g-n:#cfa8ff}
+ .flashcard{background:linear-gradient(145deg,#1c251f,#161d19)}
+ .tabs{background:rgba(16,21,18,.93)}
+ .tab.active{box-shadow:none}
+ .progress{background:#26312a}
+ .option,.row,.sheet,.input{background:var(--card);color:var(--ink)}
+ .option.correct{background:#163222;border-color:#2f7a4b}
+ .option.wrong{background:#3a1c1c;border-color:#8a3b3b}
+ .row .ru{color:#c3cdc5}
+ .toggle{background:#0e1310}
+ .toggle button.active{background:#26332b;box-shadow:none}
+ .btn.primary{color:#0b1a11}
+ .btn.good{background:#163222;border-color:#2a5c3d}
+ .btn.bad{background:#341c1c;border-color:#6b3434}
+ .btn.mid{background:#302610;border-color:#6b5520;color:#f3c969}
+ .mnemo-box{background:#29230f;border-color:#5a4a20}
+ .mnemo-box .example-title{color:#f3c969}
+ .days i{background:#26312a}
+ .days i.part{background:#2f5c41}
+ .filters-btn.active-filters{border-color:#2f5c41}
+ .modal{background:rgba(0,0,0,.6)}
 }
 </style>
 </head>
@@ -263,7 +298,7 @@ button{cursor:pointer}
       <div><h2 class="section-title">Тест</h2><div class="hint" id="quizHint"></div></div>
       <button class="btn" id="newQuizBtn">Новый вопрос</button>
     </div>
-    <div class="toggle quiz-modes" id="quizMode"><button data-mode="choice" class="active">Варианты</button><button data-mode="write">Написать</button><button data-mode="gap">Пропуск</button><button data-mode="listen">На слух</button></div>
+    <div class="toggle quiz-modes" id="quizMode"><button data-mode="choice" class="active">Выбор</button><button data-mode="write">Написать</button><button data-mode="gap">Пропуск</button><button data-mode="listen">На слух</button><button data-mode="gender">Род</button></div>
     <div class="quiz-q" id="quizQ"></div>
     <div class="gap-ru" id="quizSub" hidden></div>
     <div class="options" id="quizOptions"></div>
@@ -276,6 +311,13 @@ button{cursor:pointer}
 </section>
 
 <section id="words" class="view">
+  <div class="panel lesson-panel" id="lessonPanel">
+    <h2 class="section-title">Уроки курса</h2>
+    <div class="hint">Словари уроков курса B1. Выберите урок — карточки, тест и список ниже покажут только его слова.</div>
+    <select class="control" id="lessonSelect" aria-label="Урок курса"></select>
+    <div class="today-line" id="lessonInfo"></div>
+    <div class="sync-actions"><button class="btn primary" id="lessonStudyBtn" type="button">Учить урок</button><button class="btn" id="lessonAddBtn" type="button"></button><button class="btn" id="lessonClearBtn" type="button">Все слова</button></div>
+  </div>
   <div class="panel">
     <div class="list-head">
       <div><h2 class="section-title" id="wordsTitle">Все слова</h2><div class="hint" id="listCount"></div></div>
@@ -297,6 +339,7 @@ button{cursor:pointer}
     <div style="margin-top:22px">
       <div class="meta"><span>Доля известных карточек</span><span id="progressText"></span></div>
       <div class="progress"><i id="progressBar"></i></div>
+      <div class="note" id="reverseText"></div>
     </div>
     <div class="sync-box daily-box">
       <h3>Каждый день</h3>
@@ -305,6 +348,12 @@ button{cursor:pointer}
       <p class="note">Последние 14 дней: зелёный — цель выполнена, светлый — занимались, но меньше цели.</p>
       <label>Новых слов в день<select class="control" id="newPerDay"><option>5</option><option>10</option><option>15</option><option>20</option><option>30</option></select></label>
       <label>Цель: ответов в день<select class="control" id="dailyGoal"><option>10</option><option>20</option><option>30</option><option>50</option><option>100</option></select></label>
+    </div>
+    <div class="sync-box">
+      <h3>Трудные слова</h3>
+      <div class="sync-status" id="hardLine"></div>
+      <p class="note">Слово становится трудным, если вы забыли его 3 раза после того, как уже знали, или часто в нём ошибаетесь. Три верных ответа подряд — и оно больше не трудное. Таким словам особенно помогает своя подсказка.</p>
+      <div class="sync-actions"><button class="btn primary" id="hardTrainBtn" type="button">Тренировать трудные</button></div>
     </div>
     <div class="sync-box">
       <h3>Синхронизация между устройствами</h3>
@@ -354,6 +403,7 @@ button{cursor:pointer}
   </div>
 </div>
 
+<script src="lessons.js"></script>
 <script>
 const SEED = [
   {"greek":"μπαίνω","russian":"входить","topic":"Направления и расположение","note":"","legacyTopic":"Неправильные глаголы","verbs":[{"lemma":"μπαίνω","aorist":"μπήκα","imperfect":"έμπαινα"}]},
@@ -1409,7 +1459,14 @@ let quizTimer;
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const pFor = w => progress[idOf(w)] || {correct:0,wrong:0,streak:0,fav:false,last:0};
+const EMPTY_ENTRY = Object.freeze({correct:0,wrong:0,streak:0,fav:false,last:0});
+// "Значение → слово" has its own schedule (rev|<id>): recalling a word is harder than recognising it.
+// Hints and favourites belong to the word itself and live on the main entry.
+const REV_PREFIX = "rev|";
+const dirNow = () => $("#direction").value;
+const progressKey = (w, dir=dirNow()) => dir==="ru-gr" ? REV_PREFIX+idOf(w) : idOf(w);
+const pFor = (w, dir) => progress[progressKey(w, dir)] || EMPTY_ENTRY;
+const baseP = w => progress[idOf(w)] || EMPTY_ENTRY;
 
 function syncState(raw){
   if(raw===storedState) return;
@@ -1478,7 +1535,7 @@ function verbMarkup(verbs){
 }
 function initFilters(){
   const sel=$("#topicFilter"), cur=sel.value;
-  sel.innerHTML=`<option value="">Все темы</option><option value="${VERB_FILTER}">Глаголы</option>`+
+  sel.innerHTML=`<option value="">Все темы</option><option value="${HARD_FILTER}">⚠ Трудные слова</option><option value="${VERB_FILTER}">Глаголы</option>`+
     topics().map(t=>`<option value="${esc(TOPIC_PREFIX+t)}">${esc(t)}</option>`).join("");
   if([...sel.options].some(o=>o.value===cur)) sel.value=cur;
 }
@@ -1486,14 +1543,17 @@ function applyFilter(){
   const q=searchKey($("#search").value.trim());
   const selection=$("#topicFilter").value;
   const topic=selection.slice(TOPIC_PREFIX.length);
+  const lesson=currentLesson();
   filtered=vocab.filter(word=>{
-    if(selection===VERB_FILTER ? !word.verbs.length : topic && !word.topic.split(" / ").includes(topic)) return false;
+    if(lesson && !inLesson(word, lesson)) return false;
+    if(selection===HARD_FILTER ? !isHard(word) :
+      selection===VERB_FILTER ? !word.verbs.length : topic && !word.topic.split(" / ").includes(topic)) return false;
     return !q || [word.greek,word.russian,word.note,...word.verbs.flatMap(v=>[v.lemma,v.aorist,v.imperfect])]
       .some(value=>searchKey(value).includes(q));
   });
   refreshStudyPool();
   if(cardIndex>=studyPool.length) cardIndex=0;
-  renderCard(); renderList(); renderStats(); newQuiz();
+  renderCard(); renderList(); renderStats(); newQuiz(); renderLessons(); updateFiltersBtn();
   $("#countPill").textContent=`${vocab.length} слов`;
 }
 function practiceCards(words){
@@ -1589,6 +1649,11 @@ function srsOf(p){
   }
   return null;
 }
+// A word is hard when it was forgotten three times after being learned, or is often wrong.
+// Three right answers in a row take it off the list.
+const HARD_FILTER = ":hard";
+const hardEntry = p => !!p && p.streak<3 && ((p.lapses||0)>=3 || (p.wrong>=4 && p.wrong*2>=p.correct));
+const isHard = w => hardEntry(progress[idOf(w)]) || hardEntry(progress[REV_PREFIX+idOf(w)]);
 function nextSchedule(p, grade, now=clockNow(), keepEase=false){
   let {ivl, ease, reps, lapses}=srsOf(p) ?? {ivl:0, ease:250, reps:0, lapses:0};
   if(grade==="again"){
@@ -1634,14 +1699,14 @@ function streakDays(){
 // One answer: counters, schedule and the day's tally. "card" is a flashcard, "recall" is typing the
 // word, "recognize" is picking or hearing it. Tests move only cards that are due (or reset a
 // forgotten one); new words enter through the cards, within the daily limit.
-function answer(w, grade, mode){
-  const key=idOf(w), p={...pFor(w)}, now=clockNow();
+function answer(w, grade, mode, dir=dirNow()){
+  const key=progressKey(w, dir), p={...pFor(w, dir)}, now=clockNow();
   const s=srsOf(p), isNew=!s;
   // A test answer about a word not yet studied only counts toward the day: the word itself
   // stays new and enters the plan through the cards, within the daily limit.
   if(isNew && mode!=="card") return saveState(vocab, withDayCount(progress, false));
   // The schedule comes from the state before this answer, as the buttons preview it.
-  const schedule=nextSchedule(pFor(w), grade, now, mode==="recognize");
+  const schedule=nextSchedule(pFor(w, dir), grade, now, mode==="recognize");
   if(grade==="again"){ p.wrong++; p.streak=0; } else { p.correct++; p.streak++; }
   p.last=now;
   if(mode==="card" || (s && (grade==="again" || s.due<=now))){
@@ -1660,6 +1725,11 @@ function buildQueue(cards){
   }
   dueNow.sort((a,b)=>a[0]-b[0]);
   later.sort((a,b)=>a[0]-b[0]);
+  // "Значение → слово" first brings words you already recognise, the best known first.
+  if(dirNow()==="ru-gr"){
+    const known=c=>srsOf(baseP(c))?.ivl ?? -1;
+    fresh.sort((a,b)=>known(b)-known(a));
+  }
   const newLeft=Math.max(0, settings().newPerDay+extraNew-dayTotals(localDate()).fresh);
   const news=fresh.slice(0,newLeft), reviews=dueNow.map(x=>x[1]), queue=[];
   const newCount=news.length;
@@ -1677,6 +1747,9 @@ function renderToday(){
   const parts=studyMode==="review" ? [`к повтору <b>${queueInfo.due}</b>`, `новых <b>${queueInfo.news}</b>`] : ["вразброс, без плана"];
   parts.push(`сегодня <b>${today}</b>/${goal}`);
   if(streak) parts.push(`🔥 ${streak} ${plural(streak,"день","дня","дней")}`);
+  const lesson=currentLesson();
+  if(lesson) parts.unshift(`📘 ${esc(lesson.n)}<button class="chip-x" type="button" data-clear-lesson aria-label="Показать все слова">✕</button>`);
+  else if($("#topicFilter").value===HARD_FILTER) parts.unshift("⚠ трудные слова");
   $("#todayLine").innerHTML=parts.join(" · ");
 }
 function renderDaily(){
@@ -1765,13 +1838,138 @@ function gapFor(w){
   return found;
 }
 
+// ---- Gender: ο / η / το ----
+// The article comes from the word itself or, for a bare noun, from the course dictionaries.
+const GENDER_CLASS = {"ο":"g-m","η":"g-f","το":"g-n"};
+const genderByWord = new Map();
+{
+  const conflicts=new Set();
+  const note=gr=>{
+    const m=String(gr).normalize("NFC").trim().match(/^(ο|η|το)\s+([\p{L}\p{M}]+)$/u);
+    if(!m) return;
+    const k=looseKey(m[2]), had=genderByWord.get(k);
+    if(had && had!==m[1]) conflicts.add(k); else genderByWord.set(k,m[1]);
+  };
+  for(const w of SEED) note(w.greek);
+  if(typeof COURSE_LESSONS!=="undefined") for(const l of COURSE_LESSONS) for(const [gr] of l.w) note(gr);
+  for(const k of conflicts) genderByWord.delete(k);
+}
+function genderOf(w){
+  const g=String(w.greek).normalize("NFC").trim();
+  const own=g.match(/^(ο|η|το)\s+([\p{L}\p{M}]+)$/u);
+  if(own) return {art:own[1], bare:own[2], own:true};
+  if(!/^[\p{L}\p{M}]+$/u.test(g)) return null;
+  const art=genderByWord.get(looseKey(g));
+  return art ? {art, bare:g, own:false} : null;
+}
+function greekHtml(w){
+  const g=genderOf(w);
+  if(!g) return esc(w.greek);
+  return `<span class="${GENDER_CLASS[g.art]}">${g.own ? "" : `<span class="art">${g.art}</span> `}${esc(w.greek)}</span>`;
+}
+
+// ---- Lessons of the GreekBy course ----
+// A word belongs to a lesson when one of its spellings (without the article) is in the lesson's dictionary.
+const LESSONS = typeof COURSE_LESSONS!=="undefined" ? COURSE_LESSONS : [];
+const LESSON_KEY = "greekNotebookLesson";
+let lessonId = null;
+try { lessonId=localStorage.getItem(LESSON_KEY); } catch {}
+const wordKeys = gr => answerForms(gr).map(looseKey).filter(k=>k.length>=3);
+const lessonKeyCache = new Map();
+function lessonKeys(l){
+  if(!lessonKeyCache.has(l.id)) lessonKeyCache.set(l.id, new Set(l.w.flatMap(([gr])=>wordKeys(gr))));
+  return lessonKeyCache.get(l.id);
+}
+function currentLesson(){
+  return lessonId ? LESSONS.find(l=>l.id===lessonId) || null : null;
+}
+function inLesson(word, l){
+  const keys=lessonKeys(l);
+  return wordKeys(word.greek).some(k=>keys.has(k));
+}
+function missingFromLesson(l){
+  const all=new Set(vocab.flatMap(w=>wordKeys(w.greek)));
+  const seen=new Set();
+  return l.w.filter(([gr])=>{
+    const keys=wordKeys(gr);
+    if(!keys.length || keys.some(k=>all.has(k) || seen.has(k))) return false;
+    keys.forEach(k=>seen.add(k));
+    return true;
+  });
+}
+// Words of a lesson that can be added: verb forms take the meaning of their dictionary form,
+// from the course or from the user's own words; a form with no known meaning is left out.
+function lessonAdditions(l){
+  const ids=new Set(vocab.map(idOf)), name=l.n.toLowerCase();
+  const tense=/прошедш/.test(name) ? "прош. время" : /будущ/.test(name) ? "буд. время" :
+    /повелит/.test(name) ? "повелит." : /настоящ/.test(name) ? "наст. время" : "";
+  return missingFromLesson(l).map(([greek, russian, lemma])=>{
+    if(!lemma) return {greek, russian, topic:"Курс B1", note:"", verbs:[]};
+    const lemmaKey=looseKey(lemma);
+    const meaning=russian || vocab.find(w=>answerForms(w.greek).some(f=>looseKey(f)===lemmaKey))?.russian;
+    return meaning ? {greek, russian:meaning+(tense ? ` (${tense})` : ""), topic:"Курс B1", note:"форма глагола "+lemma, verbs:[]} : null;
+  }).filter(w=>w && !ids.has(idOf(w)));
+}
+function setLesson(id){
+  lessonId=id || null;
+  try { lessonId ? localStorage.setItem(LESSON_KEY, lessonId) : localStorage.removeItem(LESSON_KEY); } catch {}
+  cardIndex=0; revealed=false;
+  applyFilter();
+}
+function renderLessons(){
+  const panel=$("#lessonPanel");
+  panel.hidden=!LESSONS.length;
+  if(!LESSONS.length) return;
+  const sel=$("#lessonSelect");
+  if(!sel.options.length){
+    const groups=new Map();
+    for(const l of LESSONS){
+      const g=l.c+(l.s ? " · "+l.s : "");
+      if(!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(l);
+    }
+    sel.innerHTML='<option value="">— выберите урок —</option>'+[...groups].map(([g,list])=>
+      `<optgroup label="${esc(g)}">${list.map(l=>`<option value="${esc(l.id)}">${esc(l.n)} (${l.w.length})</option>`).join("")}</optgroup>`).join("");
+  }
+  const l=currentLesson();
+  sel.value=l ? l.id : "";
+  $("#lessonStudyBtn").hidden=$("#lessonClearBtn").hidden=!l;
+  if(!l){
+    $("#lessonInfo").textContent=`${LESSONS.length} ${plural(LESSONS.length,"урок","урока","уроков")}. Слова урока, которых ещё нет в словаре, можно добавить одной кнопкой.`;
+    $("#lessonAddBtn").hidden=true;
+    return;
+  }
+  const missing=lessonAdditions(l), mine=vocab.filter(w=>inLesson(w,l));
+  const learned=mine.filter(w=>(srsOf(baseP(w))?.ivl||0)>=1).length;
+  $("#lessonInfo").innerHTML=`В словаре <b>${mine.length}</b> ${plural(mine.length,"слово","слова","слов")} урока · выучено <b>${learned}</b>`+
+    (missing.length ? ` · ещё не добавлено <b>${missing.length}</b>` : "");
+  $("#lessonAddBtn").hidden=!missing.length;
+  $("#lessonAddBtn").textContent=`+ Добавить ${missing.length} ${plural(missing.length,"слово","слова","слов")}`;
+  $("#lessonStudyBtn").disabled=!mine.length;
+}
+$("#lessonSelect").onchange=e=>setLesson(e.target.value);
+$("#lessonClearBtn").onclick=()=>setLesson(null);
+$("#lessonStudyBtn").onclick=()=>{
+  $('.tab[data-view="study"]').click();
+  window.scrollTo({top:0});
+};
+$("#lessonAddBtn").onclick=()=>{
+  const l=currentLesson(); if(!l) return;
+  const added=lessonAdditions(l);
+  if(!added.length) return;
+  if(saveState([...vocab, ...added], progress)){ initFilters(); applyFilter(); }
+};
+$("#todayLine").onclick=e=>{ if(e.target.closest("[data-clear-lesson]")) setLesson(null); };
+
 // ---- Own memory hints ----
 let shownCardId=null, hintShown=false, hintEditing=false;
+const MNEMO_IDEA=$("#mnemoIdea").textContent;
 function renderMnemo(w){
-  const box=$("#mnemoBox"), hint=w ? (pFor(w).hint||"") : "";
+  const box=$("#mnemoBox"), hint=w ? (baseP(w).hint||"") : "";
   box.hidden=!w || (!revealed && !hint);
   if(box.hidden) return;
   $("#mnemoText").textContent=hint;
+  $("#mnemoIdea").textContent=isHard(w) ? "⚠ Это слово даётся трудно. Придумайте для него ассоциацию — созвучие, яркий образ, маленькую историю, так оно запомнится." : MNEMO_IDEA;
   $("#mnemoText").hidden=!hint || (!revealed && !hintShown) || hintEditing;
   $("#mnemoShow").hidden=!hint || revealed || hintShown;
   $("#mnemoIdea").hidden=!!hint || hintEditing;
@@ -1784,14 +1982,14 @@ $("#mnemoEdit").onclick=()=>{
   const w=currentCard(); if(!w) return;
   hintEditing=true; renderMnemo(w);
   const input=$("#mnemoInput");
-  input.value=pFor(w).hint||"";
+  input.value=baseP(w).hint||"";
   input.focus();
 };
 $("#mnemoCancel").onclick=()=>{ hintEditing=false; renderMnemo(currentCard()); };
 $("#mnemoForm").onsubmit=e=>{
   e.preventDefault();
   const w=currentCard(); if(!w) return;
-  const key=idOf(w), entry={...pFor(w)}, hint=$("#mnemoInput").value.trim().slice(0,300);
+  const key=idOf(w), entry={...baseP(w)}, hint=$("#mnemoInput").value.trim().slice(0,300);
   if(hint) entry.hint=hint; else delete entry.hint;
   if(saveState(vocab, {...progress, [key]:entry})){ hintEditing=false; renderMnemo(w); renderList(); }
 };
@@ -1875,17 +2073,17 @@ function renderCard(){
     return;
   }
   const dir=$("#direction").value;
-  $("#cardPrompt").textContent=dir==="gr-ru"?w.greek:w.russian;
-  $("#cardAnswer").textContent=dir==="gr-ru"?w.russian:w.greek;
+  $("#cardPrompt").innerHTML=dir==="gr-ru"?greekHtml(w):esc(w.russian);
+  $("#cardAnswer").innerHTML=dir==="gr-ru"?esc(w.russian):greekHtml(w);
   $("#cardAnswer").hidden=!revealed;
   $("#cardHint").hidden=revealed;
   $("#cardHint").textContent="Нажмите на карточку, чтобы открыть ответ";
   $("#cardTopic").textContent=w.topic.replaceAll(" / "," · ");
   $("#cardProgress").textContent=studyMode==="review" ? `осталось ${studyPool.length}` : `${cardIndex+1} / ${studyPool.length||1}`;
   const p=pFor(w), s=srsOf(p);
-  $("#cardScore").textContent=s ? `✓ ${p.correct} · ✕ ${p.wrong} · интервал ${ivlLabel(s)}` : "🆕 новое слово";
+  $("#cardScore").textContent=(s ? `✓ ${p.correct} · ✕ ${p.wrong} · интервал ${ivlLabel(s)}` : "🆕 новое слово")+(isHard(w) ? " · ⚠ трудное" : "");
   for(const grade of ["again","hard","easy"]) $("#"+grade+"Ivl").textContent=ivlLabel(nextSchedule(p,grade));
-  $("#cardFav").textContent=p.fav?"★ избранное":"☆";
+  $("#cardFav").textContent=baseP(w).fav?"★ избранное":"☆";
 }
 function nextCard(){
   revealed=false;
@@ -1912,7 +2110,7 @@ $("#randomBtn").onclick=()=>$('#studyMode button[data-mode="random"]').click();
 $("#speakBtn").onclick=()=>{
   const w=currentCard(); if(w) say(sayText(w));
 };
-$("#direction").onchange=()=>{revealed=false;renderCard();newQuiz()};
+$("#direction").onchange=()=>{revealed=false;refreshStudyPool();renderCard();newQuiz()};
 $("#tense").onchange=()=>{cardIndex=0;revealed=false;applyFilter();};
 $("#exampleFilter").onchange=()=>{cardIndex=0;revealed=false;applyFilter();};
 $("#topicFilter").onchange=applyFilter;
@@ -1939,13 +2137,14 @@ const QUIZ_HINTS = {
   choice:"4 варианта ответа. Ошибки попадут в повтор.",
   write:"Напишите ответ сами — так слово запоминается лучше всего. Ударение не обязательно, но я подскажу.",
   gap:"Вставьте слово в живую фразу.",
-  listen:"Послушайте слово и выберите перевод."
+  listen:"Послушайте слово и выберите перевод.",
+  gender:'Какой артикль? В карточках и в списке род виден по цвету: <span class="gender-legend g-m">ο — мужской</span>, <span class="gender-legend g-f">η — женский</span>, <span class="gender-legend g-n">το — средний</span>.'
 };
 // Tests ask mostly about words already studied, preferring ones that are due.
-function pickQuizCard(pool){
+function pickQuizCard(pool, dir){
   const now=clockNow();
-  const seen=pool.filter(w=>srsOf(pFor(w)));
-  const due=seen.filter(w=>srsOf(pFor(w)).due<=now);
+  const seen=pool.filter(w=>srsOf(pFor(w, dir)));
+  const due=seen.filter(w=>srsOf(pFor(w, dir)).due<=now);
   const from=due.length && Math.random()<.7 ? due : seen.length ? seen : pool;
   return from[Math.floor(Math.random()*from.length)];
 }
@@ -1967,16 +2166,19 @@ function newQuiz(){
   $("#quizFeedback").textContent=""; $("#quizFeedback").className="feedback";
   form.hidden=true; sub.hidden=true;
   input.value=""; input.readOnly=false; $("#writeBtn").textContent="Проверить";
-  $("#quizHint").textContent=QUIZ_HINTS[quizMode];
+  const lesson=currentLesson();
+  $("#quizHint").innerHTML=(lesson ? `📘 ${esc(lesson.n)} · ` : "")+QUIZ_HINTS[quizMode];
   $("#quizQ").classList.toggle("sentence", quizMode==="gap");
   let pool=practiceCards(filtered);
   if(quizMode==="gap") pool=pool.filter(w=>gapFor(w));
+  if(quizMode==="gender") pool=pool.filter(w=>genderOf(w));
   quizCurrent=null;
   if(pool.length<2){
-    $("#quizQ").textContent=quizMode==="gap" ? "Для этих слов пока нет фраз с пропуском." : "Для теста нужны хотя бы два слова.";
+    $("#quizQ").textContent=quizMode==="gap" ? "Для этих слов пока нет фраз с пропуском." :
+      quizMode==="gender" ? "Среди этих слов нет существительных с известным родом." : "Для теста нужны хотя бы два слова.";
     return;
   }
-  const w=pickQuizCard(pool), dir=$("#direction").value;
+  const dir=$("#direction").value, w=pickQuizCard(pool, quizMode==="choice" || quizMode==="write" ? dir : "gr-ru");
   quizCurrent=w;
   if(quizMode==="write"){
     $("#quizQ").textContent=dir==="gr-ru" ? w.greek : w.russian;
@@ -1994,6 +2196,13 @@ function newQuiz(){
     const cased=t=>capital ? t[0].toLocaleUpperCase("el")+t.slice(1) : t[0].toLocaleLowerCase("el")+t.slice(1);
     const others=distractors(pool.filter(x=>x!==w).map(x=>cased(gapFor(x).token)), g.token);
     renderOptions(shuffle([g.token,...others]), g.token, w, g.before+g.token+g.after);
+    return;
+  }
+  if(quizMode==="gender"){
+    const g=genderOf(w);
+    $("#quizQ").innerHTML=`<span lang="el">${esc(g.bare)}</span>`;
+    sub.textContent=w.russian; sub.hidden=false;
+    renderOptions(["ο","η","το"], g.art, w, g.art+" "+g.bare);
     return;
   }
   if(quizMode==="listen"){
@@ -2014,16 +2223,19 @@ function renderOptions(options, correct, w, reveal){
   for(const text of options){
     const b=document.createElement("button");
     b.className="option"; b.textContent=text;
-    if(quizMode==="gap") b.lang="el";
+    if(quizMode==="gap" || quizMode==="gender") b.lang="el";
     b.onclick=()=>{
       if(quizDone()) return;
       const ok=text===correct;
-      if(!answer(w, ok ? "hard" : "again", "recognize")) return;
+      // A gender answer counts toward the day but does not move the word's schedule.
+      const saved=quizMode==="gender" ? saveState(vocab, withDayCount(progress, false)) :
+        answer(w, ok ? "hard" : "again", "recognize", quizMode==="choice" ? dirNow() : "gr-ru");
+      if(!saved) return;
       box.dataset.done="1";
       [...box.children].forEach(x=>{ if(x.textContent===correct) x.classList.add("correct"); });
       if(!ok) b.classList.add("wrong");
       $("#quizFeedback").textContent=ok ? "Верно ✓"+(quizMode==="choice" ? "" : " · "+reveal) : "Правильный ответ: "+reveal;
-      if(quizMode==="gap") say(reveal);
+      if(quizMode==="gap" || quizMode==="gender") say(reveal);
       renderStats();
       showExample($("#quizExample"),w,true);
     };
@@ -2063,15 +2275,15 @@ $("#newQuizBtn").onclick=newQuiz;
 function renderList(){
   const root=$("#wordList");
   const verbsOnly=$("#topicFilter").value===VERB_FILTER;
-  $("#wordsTitle").textContent=verbsOnly?"Глаголы":"Все слова";
+  $("#wordsTitle").textContent=currentLesson() ? "Слова урока" : $("#topicFilter").value===HARD_FILTER ? "Трудные слова" : verbsOnly ? "Глаголы" : "Все слова";
   $("#listCount").textContent=verbsOnly ? `Карточек с глаголами: ${filtered.length}` :
     `Показано ${filtered.length} из ${vocab.length}`;
   if(!filtered.length){root.innerHTML='<div class="empty">Ничего не найдено</div>';return;}
   const show=verbsOnly?filtered:filtered.slice(0,300);
   root.innerHTML=show.map(w=>{
-    const idx=vocab.indexOf(w), p=pFor(w);
+    const idx=vocab.indexOf(w), p=baseP(w);
     return `<div class="row">
-      <div><div class="gr" lang="el">${infoFor(w)?.img?`<span class="img" aria-hidden="true">${esc(infoFor(w).img)}</span>`:""}${esc(w.greek)}</div><small>${esc(w.topic.replaceAll(" / "," · "))}</small></div>
+      <div><div class="gr" lang="el">${infoFor(w)?.img?`<span class="img" aria-hidden="true">${esc(infoFor(w).img)}</span>`:""}${greekHtml(w)}</div><small>${esc(w.topic.replaceAll(" / "," · "))}${isHard(w)?' · <span class="hard-mark">⚠ трудное</span>':""}</small></div>
       <div class="ru">${esc(w.russian)}${w.note?`<small>${esc(w.note)}</small>`:""}${p.hint?`<small>💡 ${esc(p.hint)}</small>`:""}${verbMarkup(w.verbs)}${examplesFor(w).length?`<details><summary>Примеры</summary>${exampleMarkup(examplesFor(w))}</details>`:""}</div>
       <div class="row-actions">
         <button class="iconbtn" data-speak="${idx}" title="Произнести">🔊</button>
@@ -2086,7 +2298,7 @@ $("#wordList").onclick=e=>{
   if(speak){
     say(vocab[+speak.dataset.speak].greek);
   } else if(fav){
-    const w=vocab[+fav.dataset.fav], k=idOf(w), p=pFor(w);
+    const w=vocab[+fav.dataset.fav], k=idOf(w), p=baseP(w);
     if(saveState(vocab, {...progress, [k]:{...p, fav:!p.fav}})){
       renderList(); renderStats(); renderCard();
     }
@@ -2097,7 +2309,7 @@ function openEdit(idx){
   const w=idx===null?{greek:"",russian:"",topic:"Разное",note:"",verbs:[]}:vocab[idx];
   $("#modalTitle").textContent=idx===null?"Добавить слово":"Редактировать слово";
   $("#editGreek").value=w.greek;$("#editRussian").value=w.russian;$("#editTopic").value=w.topic;$("#editNote").value=w.note||"";
-  $("#editHint").value=idx===null ? "" : (pFor(w).hint||"");
+  $("#editHint").value=idx===null ? "" : (baseP(w).hint||"");
   $("#editVerbRows").replaceChildren();
   $("#editVerbs").open=Boolean(w.verbs.length);
   w.verbs.forEach(addVerbRow);
@@ -2139,6 +2351,10 @@ $("#saveEdit").onclick=()=>{
     nextProgress[id]=progress[previousId];
     if(!words.some(word=>idOf(word)===previousId)) delete nextProgress[previousId];
   }
+  if(previousId!==null && previousId!==id && progress[REV_PREFIX+previousId]){
+    nextProgress[REV_PREFIX+id]=progress[REV_PREFIX+previousId];
+    if(!words.some(word=>idOf(word)===previousId)) delete nextProgress[REV_PREFIX+previousId];
+  }
   const hint=$("#editHint").value.trim().slice(0,300);
   const entry=nextProgress[id] || {correct:0,wrong:0,streak:0,last:0,fav:false};
   if(hint || entry.hint){
@@ -2165,6 +2381,11 @@ function renderStats(){
   const formatted=pct.toLocaleString("ru",{maximumFractionDigits:1});
   $("#progressText").textContent=`${known} из ${counted.length} · ${formatted}%`;
   $("#progressBar").style.width=pct+"%";
+  const reverse=counted.filter(w=>progress[REV_PREFIX+idOf(w)]?.streak>0).length;
+  $("#reverseText").textContent=`Значение → слово: знаю ${reverse} из ${counted.length}. У этого направления свой график повторов.`;
+  const hard=vocab.filter(isHard).length;
+  $("#hardLine").textContent=hard ? `Сейчас трудных: ${hard}` : "Трудных слов нет 👍";
+  $("#hardTrainBtn").hidden=!hard;
   renderDaily();
   renderToday();
 }
@@ -2215,8 +2436,15 @@ $("#resetBtn").onclick=()=>{
     refreshStudyPool();renderStats();renderCard();renderList();
   }
 };
+$("#hardTrainBtn").onclick=()=>{
+  $("#topicFilter").value=HARD_FILTER;
+  cardIndex=0; revealed=false; applyFilter();
+  $('#studyMode button[data-mode="random"]').click();
+  $('.tab[data-view="study"]').click();
+  window.scrollTo({top:0});
+};
 function updateFiltersBtn(){
-  const active=["topicFilter","tense","exampleFilter"].some(id=>$("#"+id).value) || $("#direction").value!=="gr-ru";
+  const active=["topicFilter","tense","exampleFilter"].some(id=>$("#"+id).value) || $("#direction").value!=="gr-ru" || !!currentLesson();
   $("#filtersBtn").classList.toggle("active-filters",active);
   $("#filtersBtn").textContent=active?"Фильтры •":"Фильтры";
 }
