@@ -2762,7 +2762,9 @@ function ensureDecks(){
     for(const seed of SEED){
       if(!seed.topic.split(" / ").includes(deck.topic)) continue;
       const i=byId.get(idOf(seed)) ?? byGreek.get(looseKey(seed.greek));
+      // Only the deck's own new words are added; older catalog words the user may have removed stay removed.
       if(i===undefined){
+        if(seed.topic!==deck.topic) continue;
         words.push({greek:seed.greek, russian:seed.russian, topic:seed.topic, note:seed.note||"", verbs:normalizeVerbs(seed.verbs)});
         byGreek.set(looseKey(seed.greek), words.length-1);
       } else if(!words[i].topic.split(" / ").includes(deck.topic)){
