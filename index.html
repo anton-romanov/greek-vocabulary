@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://gist.githubusercontent.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#f6f7f3" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#101512" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f7f3">
 <title>Ελληνικά — мои слова</title>
 <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -199,30 +198,59 @@ button{cursor:pointer}
 .lesson-panel .control{margin:12px 0 8px}
 .lesson-panel [hidden]{display:none}
 .row .hard-mark{color:var(--bad);font-weight:700}
-@media (prefers-color-scheme:dark){
- :root{--bg:#101512;--card:#18201b;--ink:#e6ece7;--muted:#97a39a;--line:#2b362f;--accent:#6fcf97;--accent2:#52b788;--soft:#1c2b22;--bad:#f09090;--good:#7ddc9f;--shadow:0 10px 30px rgba(0,0,0,.35);--g-m:#86b6ff;--g-f:#ff94ab;--g-n:#cfa8ff}
- .flashcard{background:linear-gradient(145deg,#1c251f,#161d19)}
- .tabs{background:rgba(16,21,18,.93)}
- .tab.active{box-shadow:none}
- .progress{background:#26312a}
- .option,.row,.sheet,.input{background:var(--card);color:var(--ink)}
- .option.correct{background:#163222;border-color:#2f7a4b}
- .option.wrong{background:#3a1c1c;border-color:#8a3b3b}
- .row .ru{color:#c3cdc5}
- .toggle{background:#0e1310}
- .toggle button.active{background:#26332b;box-shadow:none}
- .btn.primary{color:#0b1a11}
- .btn.good{background:#163222;border-color:#2a5c3d}
- .btn.bad{background:#341c1c;border-color:#6b3434}
- .btn.mid{background:#302610;border-color:#6b5520;color:#f3c969}
- .mnemo-box{background:#29230f;border-color:#5a4a20}
- .mnemo-box .example-title{color:#f3c969}
- .days i{background:#26312a}
- .days i.part{background:#2f5c41}
- .filters-btn.active-filters{border-color:#2f5c41}
- .modal{background:rgba(0,0,0,.6)}
-}
+/* Dark theme: data-theme is set before the page draws (auto follows the system). */
+:root[data-theme=dark]{--bg:#101512;--card:#18201b;--ink:#e6ece7;--muted:#97a39a;--line:#2b362f;--accent:#6fcf97;--accent2:#52b788;--soft:#1c2b22;--bad:#f09090;--good:#7ddc9f;--shadow:0 10px 30px rgba(0,0,0,.35);--g-m:#86b6ff;--g-f:#ff94ab;--g-n:#cfa8ff}
+:root[data-theme=dark] .flashcard{background:linear-gradient(145deg,#1c251f,#161d19)}
+:root[data-theme=dark] .tabs{background:rgba(16,21,18,.93)}
+:root[data-theme=dark] .tab.active{box-shadow:none}
+:root[data-theme=dark] .progress{background:#26312a}
+:root[data-theme=dark] .option,:root[data-theme=dark] .row,:root[data-theme=dark] .sheet,:root[data-theme=dark] .input{background:var(--card);color:var(--ink)}
+:root[data-theme=dark] .option.correct{background:#163222;border-color:#2f7a4b}
+:root[data-theme=dark] .option.wrong{background:#3a1c1c;border-color:#8a3b3b}
+:root[data-theme=dark] .row .ru{color:#c3cdc5}
+:root[data-theme=dark] .toggle{background:#0e1310}
+:root[data-theme=dark] .toggle button.active{background:#26332b;box-shadow:none}
+:root[data-theme=dark] .btn.primary{color:#0b1a11}
+:root[data-theme=dark] .btn.good{background:#163222;border-color:#2a5c3d}
+:root[data-theme=dark] .btn.bad{background:#341c1c;border-color:#6b3434}
+:root[data-theme=dark] .btn.mid{background:#302610;border-color:#6b5520;color:#f3c969}
+:root[data-theme=dark] .mnemo-box{background:#29230f;border-color:#5a4a20}
+:root[data-theme=dark] .mnemo-box .example-title{color:#f3c969}
+:root[data-theme=dark] .days i{background:#26312a}
+:root[data-theme=dark] .days i.part{background:#2f5c41}
+:root[data-theme=dark] .filters-btn.active-filters{border-color:#2f5c41}
+:root[data-theme=dark] .modal{background:rgba(0,0,0,.6)}
+.theme-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;min-width:44px;min-height:40px;font-size:18px;cursor:pointer}
+.top-right{display:flex;gap:8px;align-items:center}
 </style>
+<script>
+// Theme per device: follows the system until the button picks light or dark.
+(function(){
+  const media=matchMedia("(prefers-color-scheme: dark)");
+  let saved=""; try{ saved=localStorage.getItem("greekTheme")||""; }catch{}
+  const isDark=()=>saved ? saved==="dark" : media.matches;
+  function apply(){
+    const dark=isDark();
+    document.documentElement.dataset.theme=dark ? "dark" : "light";
+    document.documentElement.style.colorScheme=dark ? "dark" : "light";
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m=>m.content=dark ? "#101512" : "#f6f7f3");
+    const b=document.getElementById("themeBtn");
+    if(b){
+      b.textContent=dark ? "☀️" : "🌙";
+      b.title=dark ? "Тёмная тема — включить светлую" : "Светлая тема — включить тёмную";
+      b.setAttribute("aria-label",b.title);
+    }
+  }
+  window.cycleTheme=function(){
+    saved=isDark() ? "light" : "dark";
+    try{ localStorage.setItem("greekTheme",saved); }catch{}
+    apply();
+  };
+  window.applyTheme=apply;
+  media.addEventListener("change",apply);
+  apply();
+})();
+</script>
 </head>
 <body>
 <div class="shell">
@@ -231,8 +259,9 @@ button{cursor:pointer}
     <h1><a href="./" id="homeLink" title="На главную">Ελληνικά — мои слова</a></h1>
     <p>Словарь из тетради · работает офлайн</p>
   </div>
-  <div class="pill" id="countPill"></div>
+  <div class="top-right"><div class="pill" id="countPill"></div><button class="theme-btn" id="themeBtn" type="button" onclick="cycleTheme()"></button></div>
 </header>
+<script>applyTheme()</script>
 
 <div class="toolbar" id="toolbar">
   <input class="control search" id="search" type="search" enterkeyhint="search" autocomplete="off" aria-label="Поиск слов и форм" placeholder="Поиск слов и форм">
