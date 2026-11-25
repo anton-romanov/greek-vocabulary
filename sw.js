@@ -6,11 +6,20 @@ self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(FILES)));
 });
 
+// Old caches are removed, but the last saved course dictionaries move to the new cache first,
+// so the lessons stay available offline after an update.
 self.addEventListener("activate", event => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(
-    keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
-      .map(key => caches.delete(key))
-  )));
+  event.waitUntil((async () => {
+    const old = (await caches.keys()).filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME);
+    const cache = await caches.open(CACHE_NAME);
+    if (!(await cache.match("./lessons.js"))) {
+      for (const key of old) {
+        const saved = await caches.match("./lessons.js", { cacheName: key });
+        if (saved) { await cache.put("./lessons.js", saved).catch(() => {}); break; }
+      }
+    }
+    await Promise.all(old.map(key => caches.delete(key)));
+  })());
 });
 
 // The course dictionaries (lessons.js) come from the network when possible and from the cache offline.
