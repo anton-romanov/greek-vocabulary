@@ -66,6 +66,7 @@ button{cursor:pointer}
 .option.correct{border-color:#76b28c;background:#edf8f0}
 .option.wrong{border-color:#d99;background:#fff0f0}
 .feedback{min-height:28px;margin-top:12px;font-weight:700}
+.quiz-next{width:100%;min-height:50px;margin-top:6px}
 .list-head{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px}
 .word-list{display:grid;gap:8px}
 .row{display:grid;grid-template-columns:1.05fr 1.35fr auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:15px;padding:12px;background:#fff}
@@ -306,7 +307,7 @@ button{cursor:pointer}
       <input class="input" id="writeInput" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" enterkeyhint="done" aria-label="Ваш ответ">
       <button class="btn primary" id="writeBtn">Проверить</button>
     </form>
-    <div class="feedback" id="quizFeedback"></div><div class="example-box" id="quizExample" hidden></div>
+    <div class="feedback" id="quizFeedback"></div><button class="btn primary quiz-next" id="quizNextBtn" type="button" hidden>Дальше →</button><div class="example-box" id="quizExample" hidden></div>
   </div>
 </section>
 
@@ -2205,6 +2206,7 @@ function distractors(values, correct, count=3){
 }
 function newQuiz(){
   clearTimeout(quizTimer);
+  $("#quizNextBtn").hidden=true;
   showExample($("#quizExample"),null,false);
   const box=$("#quizOptions"), form=$("#writeForm"), sub=$("#quizSub"), input=$("#writeInput");
   box.innerHTML=""; box.dataset.done="0";
@@ -2283,6 +2285,9 @@ function renderOptions(options, correct, w, reveal){
       if(quizMode==="gap" || quizMode==="gender") say(reveal);
       renderStats();
       showExample($("#quizExample"),w,true);
+      // Right answers move on by themselves; after a mistake the answer stays until "Дальше".
+      $("#quizNextBtn").hidden=false;
+      if(ok) quizTimer=setTimeout(()=>{ if($("#quiz").classList.contains("active") && quizDone()) newQuiz(); }, 1400);
     };
     box.appendChild(b);
   }
@@ -2316,6 +2321,7 @@ $("#quizMode").onclick=e=>{
   if(quizMode==="write") $("#writeInput").focus();
 };
 $("#newQuizBtn").onclick=newQuiz;
+$("#quizNextBtn").onclick=newQuiz;
 
 function renderList(){
   const root=$("#wordList");
